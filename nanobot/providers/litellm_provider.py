@@ -12,6 +12,7 @@ from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
+from nanobot.providers.token_fetcher import TokenFetcher
 
 # Standard chat-completion message keys.
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
@@ -39,10 +40,12 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        token_fetcher: TokenFetcher | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._token_fetcher = token_fetcher
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -230,9 +233,12 @@ class LiteLLMProvider(LLMProvider):
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
-        # Pass extra headers (e.g. APP-Code for AiHubMix)
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
+        # Merge static extra_headers with a dynamically fetched token (if configured)
+        merged_headers = dict(self.extra_headers)
+        if self._token_fetcher:
+            merged_headers.update(await self._token_fetcher.get_header())
+        if merged_headers:
+            kwargs["extra_headers"] = merged_headers
         
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort

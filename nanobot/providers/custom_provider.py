@@ -3,19 +3,31 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import json_repair
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
+if TYPE_CHECKING:
+    from nanobot.providers.token_fetcher import TokenFetcher
+
 
 class CustomProvider(LLMProvider):
 
-    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
+    def __init__(
+        self,
+        api_key: str = "no-key",
+        api_base: str = "http://localhost:8000/v1",
+        default_model: str = "default",
+        extra_headers: dict[str, str] | None = None,
+        token_fetcher: "TokenFetcher | None" = None,
+    ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self._extra_headers = extra_headers or {}
+        self._token_fetcher = token_fetcher
         # Keep affinity stable for this provider instance to improve backend cache locality.
         self._client = AsyncOpenAI(
             api_key=api_key,
@@ -36,6 +48,12 @@ class CustomProvider(LLMProvider):
             kwargs["reasoning_effort"] = reasoning_effort
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
+        # Merge static extra_headers with a dynamically fetched token (if configured)
+        merged_headers = dict(self._extra_headers)
+        if self._token_fetcher:
+            merged_headers.update(await self._token_fetcher.get_header())
+        if merged_headers:
+            kwargs["extra_headers"] = merged_headers
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:

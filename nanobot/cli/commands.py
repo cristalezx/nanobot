@@ -222,6 +222,10 @@ def _make_provider(config: Config):
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
 
+    # Build a token fetcher if dynamic auth is configured
+    from nanobot.providers.token_fetcher import TokenFetcher
+    token_fetcher = TokenFetcher(p) if (p and p.token_url) else None
+
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     from nanobot.providers.custom_provider import CustomProvider
     if provider_name == "custom":
@@ -229,6 +233,8 @@ def _make_provider(config: Config):
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            token_fetcher=token_fetcher,
         )
 
     from nanobot.providers.litellm_provider import LiteLLMProvider
@@ -245,6 +251,7 @@ def _make_provider(config: Config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
+        token_fetcher=token_fetcher,
     )
 
 

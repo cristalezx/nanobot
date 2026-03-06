@@ -246,6 +246,15 @@ class ProviderConfig(Base):
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
+    # Dynamic token auth — fetch a fresh token before each LLM call
+    token_url: str | None = None          # URL to fetch token from (enables dynamic auth)
+    token_method: str = "POST"            # HTTP method: GET or POST
+    token_body: dict[str, str] | None = None  # Request body (sent as JSON)
+    token_json_path: str = "token"        # Dot-separated path to token in JSON response
+    token_header_name: str = "Authorization"  # Header name to inject token into
+    token_header_prefix: str = "Bearer "  # Prefix prepended to token value
+    token_ttl: int = 3600                 # Cache TTL in seconds (0 = no cache)
+
 
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
