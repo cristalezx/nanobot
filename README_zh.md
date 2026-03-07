@@ -183,6 +183,7 @@ nanobot 支持 [MCP](https://modelcontextprotocol.io/)，可连接外部工具�
 | `nanobot agent -m "..."` | 单次对话 |
 | `nanobot agent` | 进入交互式对话模式 |
 | `nanobot gateway` | 启动网关（连接聊天平台） |
+| `nanobot serve` | 启动 Web API + 聊天界面 |
 | `nanobot status` | 查看状态 |
 
 ---
@@ -211,8 +212,105 @@ nanobot/
 ├── channels/       # 📱 聊天渠道集成
 ├── providers/      # 🤖 LLM 服务商
 ├── config/         # ⚙️ 配置管理
+├── api/            # 🌐 Web API 服务（FastAPI）
+├── ui/             # 🖥️ Web 聊天界面（index.html）
 └── cli/            # 🖥️ 命令行入口
 ```
+
+---
+
+---
+
+# 🌐 Web UI 使用指南
+
+nanobot 内置轻量级 Web 服务，一条命令即可在浏览器中与 AI 对话，并支持**定时任务主动推送**。
+
+## 快速启动
+
+安装依赖：
+
+```bash
+pip install 'nanobot-ai[web]'
+```
+
+启动 Web 服务器：
+
+```bash
+nanobot serve                        # 默认 http://0.0.0.0:8080
+nanobot serve --port 9000            # 自定义端口
+nanobot serve --host 127.0.0.1      # 仅本机访问
+```
+
+打开浏览器访问 `http://localhost:8080`，即可开始对话。
+
+## 界面预览
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ ● 🐈 nanobot     [会话: default        ] [切换会话] [清除]       │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│                          👤 帮我写一个快速排序算法               │
+│                                                                  │
+│  💭 正在思考...                                                  │
+│  ⚙️ write_file("quicksort.py")                                  │
+│                                                                  │
+│  🐈 好的！以下是 Python 快速排序实现：                           │
+│     ```python                                                    │
+│     def quicksort(arr):                                          │
+│         if len(arr) <= 1: return arr                             │
+│         pivot = arr[len(arr)//2]                                 │
+│         ...                                                      │
+│     ```                                                          │
+│                                                                  │
+│  🔔 系统通知                                                     │
+│     [定时任务] 每日报告已生成，请查收摘要…                       │
+│                                                                  │
+├──────────────────────────────────────────────────────────────────┤
+│  [输入消息，Shift+Enter 换行，Enter 发送…         ]  [发送]      │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+## 功能说明
+
+| 功能 | 说明 |
+|------|------|
+| **多会话** | 右上角输入会话 ID，点击「切换会话」隔离不同对话上下文 |
+| **Markdown 渲染** | 代码块、标题、列表等自动渲染 |
+| **进度流式展示** | LLM 思考过程和工具调用实时显示（💭 / ⚙️） |
+| **定时任务推送** | 🔔 定时任务到期后，结果自动推送到当前会话，无需刷新页面 |
+| **清除会话** | 点击「清除」重置当前会话上下文 |
+
+## API 接口
+
+Web 服务同时提供 REST + WebSocket 接口，方便二次开发：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/` | Web 聊天界面 |
+| `GET` | `/v1/health` | 健康检查 |
+| `GET` | `/v1/sessions` | 列出所有会话 |
+| `DELETE` | `/v1/sessions/{id}` | 清除指定会话 |
+| `WS` | `/v1/ws/{session_id}` | WebSocket 双向通信（聊天 + 服务端推送） |
+
+**WebSocket 消息格式：**
+
+客户端发送：
+```json
+{ "content": "你的消息" }
+```
+
+服务端推送：
+```json
+{ "type": "progress", "content": "思考中..." }
+{ "type": "tool",     "content": "write_file(...)" }
+{ "type": "message",  "content": "最终回复" }
+{ "type": "push",     "content": "定时任务通知" }
+```
+
+## 定时任务推送原理
+
+通过 AI 工具设置定时任务时，指定 `channel=web` 和 `to=<会话ID>`，任务触发后结果会通过 WebSocket 实时推送到对应会话窗口，无需轮询。
 
 ---
 

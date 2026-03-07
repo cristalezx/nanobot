@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐈 nanobot</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/core.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: #f5f5f5; height: 100vh; display: flex; flex-direction: column; }
+
+  /* ── Header ── */
+  header {
+    background: #1a1a2e; color: #fff; padding: 10px 16px;
+    display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(0,0,0,.3);
+  }
+  header h1 { font-size: 1.1rem; flex: 1; }
+  #session-input {
+    background: #2a2a4e; border: 1px solid #4a4a8e; color: #ccc;
+    border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; width: 160px;
+  }
+  #session-input:focus { outline: none; border-color: #7c7cff; }
+  .btn {
+    background: #5c5cff; color: #fff; border: none; border-radius: 6px;
+    padding: 5px 12px; cursor: pointer; font-size: 0.8rem; white-space: nowrap;
+  }
+  .btn:hover { background: #4444dd; }
+  .btn.danger { background: #c0392b; }
+  .btn.danger:hover { background: #a93226; }
+  #status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #e74c3c; flex-shrink: 0;
+  }
+  #status-dot.connected { background: #27ae60; }
+
+  /* ── Chat area ── */
+  #chat {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+
+  /* ── Message bubbles ── */
+  .msg { display: flex; gap: 8px; max-width: 88%; }
+  .msg.user { flex-direction: row-reverse; align-self: flex-end; }
+  .msg.bot  { align-self: flex-start; }
+  .msg.push { align-self: center; max-width: 96%; }
+
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem; background: #ddd;
+  }
+  .msg.user .avatar { background: #5c5cff; }
+  .msg.bot  .avatar { background: #e8e8e8; }
+  .msg.push .avatar { background: #f39c12; }
+
+  .bubble {
+    padding: 10px 14px; border-radius: 14px; line-height: 1.5;
+    font-size: 0.9rem; word-break: break-word;
+  }
+  .msg.user .bubble {
+    background: #5c5cff; color: #fff; border-bottom-right-radius: 4px;
+  }
+  .msg.bot .bubble {
+    background: #fff; color: #222; border-bottom-left-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  }
+  .msg.push .bubble {
+    background: #fff3cd; color: #856404; border-radius: 10px;
+    border: 1px solid #ffc107; font-size: 0.85rem; width: 100%;
+  }
+
+  /* ── Markdown inside bubbles ── */
+  .bubble pre { background: #f6f8fa; border-radius: 6px; padding: 10px;
+                overflow-x: auto; margin: 6px 0; }
+  .bubble code { font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.85em; }
+  .bubble p { margin-bottom: 6px; }
+  .bubble p:last-child { margin-bottom: 0; }
+  .bubble ul, .bubble ol { padding-left: 18px; margin-bottom: 6px; }
+  .bubble h1,.bubble h2,.bubble h3 { margin: 8px 0 4px; }
+  .msg.user .bubble pre { background: #4444cc; }
+  .msg.user .bubble code { color: #ffe; }
+
+  /* ── Progress / thinking ── */
+  .progress-line {
+    align-self: flex-start; font-size: 0.78rem; color: #888;
+    padding: 4px 10px; background: #efefef; border-radius: 12px;
+    max-width: 80%; white-space: pre-wrap; word-break: break-word;
+  }
+  .tool-line {
+    align-self: flex-start; font-size: 0.78rem; color: #5c5cff;
+    padding: 3px 10px; background: #eef; border-radius: 12px;
+    font-family: monospace;
+  }
+
+  /* ── Typing indicator ── */
+  .typing {
+    align-self: flex-start; display: flex; gap: 5px; padding: 10px 14px;
+    background: #fff; border-radius: 14px; border-bottom-left-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  }
+  .typing span {
+    width: 7px; height: 7px; background: #999; border-radius: 50%;
+    animation: bounce 1.2s infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: .2s; }
+  .typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes bounce {
+    0%,60%,100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+  }
+
+  /* ── Input bar ── */
+  #input-bar {
+    background: #fff; border-top: 1px solid #e0e0e0;
+    padding: 10px 14px; display: flex; gap: 8px; flex-shrink: 0;
+  }
+  #msg-input {
+    flex: 1; border: 1px solid #ddd; border-radius: 20px;
+    padding: 8px 16px; font-size: 0.9rem; resize: none; outline: none;
+    max-height: 120px; overflow-y: auto; line-height: 1.4;
+    font-family: inherit;
+  }
+  #msg-input:focus { border-color: #5c5cff; }
+  #send-btn {
+    background: #5c5cff; color: #fff; border: none; border-radius: 20px;
+    padding: 8px 18px; cursor: pointer; font-size: 0.9rem; align-self: flex-end;
+  }
+  #send-btn:hover { background: #4444dd; }
+  #send-btn:disabled { background: #aaa; cursor: default; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div id="status-dot" title="WebSocket 状态"></div>
+  <h1>🐈 nanobot</h1>
+  <input id="session-input" type="text" value="default" placeholder="会话 ID" title="会话 ID（不同 ID 对应独立上下文）">
+  <button class="btn" onclick="reconnect()">切换会话</button>
+  <button class="btn danger" onclick="clearSession()">清除</button>
+</header>
+
+<!-- Chat messages -->
+<div id="chat"></div>
+
+<!-- Input -->
+<div id="input-bar">
+  <textarea id="msg-input" rows="1" placeholder="输入消息，Shift+Enter 换行，Enter 发送…"></textarea>
+  <button id="send-btn" onclick="sendMessage()">发送</button>
+</div>
+
+<script>
+marked.setOptions({ breaks: true, gfm: true });
+
+let ws = null;
+let busy = false;
+let typingEl = null;
+
+const chat      = document.getElementById('chat');
+const input     = document.getElementById('msg-input');
+const sendBtn   = document.getElementById('send-btn');
+const dot       = document.getElementById('status-dot');
+const sessInput = document.getElementById('session-input');
+
+// ── WebSocket ────────────────────────────────────────────────────────────
+function connect() {
+  const sid = sessInput.value.trim() || 'default';
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/v1/ws/${sid}`);
+
+  ws.onopen = () => {
+    dot.className = 'connected';
+    appendSystem(`已连接到会话「${sid}」`);
+  };
+
+  ws.onclose = () => {
+    dot.className = '';
+    appendSystem('连接断开，5 秒后重连…');
+    setTimeout(connect, 5000);
+  };
+
+  ws.onerror = () => ws.close();
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'progress') {
+      removeTyping();
+      appendProgress(msg.content, false);
+    } else if (msg.type === 'tool') {
+      removeTyping();
+      appendProgress(msg.content, true);
+    } else if (msg.type === 'message') {
+      removeTyping(); removeProgress();
+      appendBot(msg.content);
+      setBusy(false);
+    } else if (msg.type === 'push') {
+      // Server-initiated push (e.g. cron notifications)
+      removeTyping(); removeProgress();
+      appendPush(msg.content);
+      setBusy(false);
+    }
+  };
+}
+
+function reconnect() {
+  if (ws) ws.close();
+  chat.innerHTML = '';
+  connect();
+}
+
+// ── Send ─────────────────────────────────────────────────────────────────
+function sendMessage() {
+  const text = input.value.trim();
+  if (!text || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
+  appendUser(text);
+  ws.send(JSON.stringify({ content: text }));
+  input.value = '';
+  input.style.height = '';
+  showTyping();
+  setBusy(true);
+}
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+input.addEventListener('input', () => {
+  input.style.height = '';
+  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+});
+
+// ── Session clear ─────────────────────────────────────────────────────────
+async function clearSession() {
+  const sid = sessInput.value.trim() || 'default';
+  await fetch(`/v1/sessions/web:${sid}`, { method: 'DELETE' });
+  chat.innerHTML = '';
+  appendSystem(`会话「${sid}」已清除`);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function setBusy(v) {
+  busy = v;
+  sendBtn.disabled = v;
+}
+
+function scrollBottom() {
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function renderMarkdown(md) {
+  return marked.parse(md || '');
+}
+
+function appendUser(text) {
+  const el = document.createElement('div');
+  el.className = 'msg user';
+  el.innerHTML = `<div class="avatar">👤</div>
+    <div class="bubble">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
+  chat.appendChild(el);
+  scrollBottom();
+}
+
+function appendBot(text) {
+  const el = document.createElement('div');
+  el.className = 'msg bot';
+  el.innerHTML = `<div class="avatar">🐈</div>
+    <div class="bubble">${renderMarkdown(text)}</div>`;
+  chat.appendChild(el);
+  scrollBottom();
+}
+
+function appendPush(text) {
+  const el = document.createElement('div');
+  el.className = 'msg push';
+  el.innerHTML = `<div class="avatar">🔔</div>
+    <div class="bubble"><strong>系统通知</strong><br>${renderMarkdown(text)}</div>`;
+  chat.appendChild(el);
+  scrollBottom();
+}
+
+function appendSystem(text) {
+  const el = document.createElement('div');
+  el.className = 'progress-line';
+  el.textContent = `ℹ️ ${text}`;
+  chat.appendChild(el);
+  scrollBottom();
+}
+
+let progressEls = [];
+function appendProgress(text, isTool) {
+  const el = document.createElement('div');
+  el.className = isTool ? 'tool-line' : 'progress-line';
+  el.textContent = isTool ? `⚙️ ${text}` : `💭 ${text.slice(0, 200)}`;
+  chat.appendChild(el);
+  progressEls.push(el);
+  scrollBottom();
+}
+function removeProgress() {
+  progressEls.forEach(el => el.remove());
+  progressEls = [];
+}
+
+function showTyping() {
+  typingEl = document.createElement('div');
+  typingEl.className = 'typing';
+  typingEl.innerHTML = '<span></span><span></span><span></span>';
+  chat.appendChild(typingEl);
+  scrollBottom();
+}
+function removeTyping() {
+  if (typingEl) { typingEl.remove(); typingEl = null; }
+}
+
+function escapeHtml(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;')
+          .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+connect();
+</script>
+</body>
+</html>

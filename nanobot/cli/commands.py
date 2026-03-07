@@ -437,6 +437,111 @@ def gateway(
     asyncio.run(run())
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind"),
+    port: int = typer.Option(8080, "--port", "-p", help="Port to listen on"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Start the nanobot web API server with chat UI."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]uvicorn is required: pip install 'nanobot-ai[web]'[/red]")
+        raise typer.Exit(1)
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.api.server import create_app
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.loader import load_config
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronJob
+    from nanobot.session.manager import SessionManager
+
+    config_path = Path(config) if config else None
+    cfg = load_config(config_path)
+    if workspace:
+        cfg.agents.defaults.workspace = workspace
+
+    console.print(f"{__logo__} Starting nanobot web server on [cyan]http://{host}:{port}[/cyan]")
+    sync_workspace_templates(cfg.workspace_path)
+
+    bus = MessageBus()
+    provider = _make_provider(cfg)
+    session_manager = SessionManager(cfg.workspace_path)
+    cron_store_path = cfg.workspace_path / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    agent = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=cfg.workspace_path,
+        model=cfg.agents.defaults.model,
+        temperature=cfg.agents.defaults.temperature,
+        max_tokens=cfg.agents.defaults.max_tokens,
+        max_iterations=cfg.agents.defaults.max_tool_iterations,
+        memory_window=cfg.agents.defaults.memory_window,
+        reasoning_effort=cfg.agents.defaults.reasoning_effort,
+        brave_api_key=cfg.tools.web.search.api_key or None,
+        web_proxy=cfg.tools.web.proxy or None,
+        exec_config=cfg.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=cfg.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        mcp_servers=cfg.tools.mcp_servers,
+    )
+
+    async def on_cron_job(job: CronJob) -> str | None:
+        from nanobot.agent.tools.cron import CronTool
+        from nanobot.bus.events import OutboundMessage as OMsg
+        reminder_note = (
+            "[Scheduled Task] Timer finished.\n\n"
+            f"Task '{job.name}' has been triggered.\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
+        cron_tool = agent.tools.get("cron")
+        token = None
+        if isinstance(cron_tool, CronTool):
+            token = cron_tool.set_cron_context(True)
+        try:
+            response = await agent.process_direct(
+                reminder_note,
+                session_key=f"cron:{job.id}",
+                channel=job.payload.channel or "web",
+                chat_id=job.payload.to or "default",
+            )
+        finally:
+            if isinstance(cron_tool, CronTool) and token is not None:
+                cron_tool.reset_cron_context(token)
+        if job.payload.deliver and job.payload.to and response:
+            await bus.publish_outbound(OMsg(
+                channel=job.payload.channel or "web",
+                chat_id=job.payload.to or "default",
+                content=response,
+            ))
+        return response
+
+    cron.on_job = on_cron_job
+
+    ui_path = Path(__file__).parent.parent / "ui"
+    fast_app = create_app(agent, bus, ui_path)
+
+    async def run():
+        try:
+            await cron.start()
+            await agent._connect_mcp()
+            server = uvicorn.Server(uvicorn.Config(
+                fast_app, host=host, port=port, log_level="warning"
+            ))
+            await server.serve()
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+        finally:
+            cron.stop()
+            await agent.close_mcp()
+
+    asyncio.run(run())
 
 
 # ============================================================================
