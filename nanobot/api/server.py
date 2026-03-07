@@ -15,7 +15,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 
 
-class _ConnectionManager:
+class ConnectionManager:
     """Track active WebSocket connections by session key."""
 
     def __init__(self) -> None:
@@ -24,6 +24,7 @@ class _ConnectionManager:
     async def connect(self, key: str, ws: WebSocket) -> None:
         await ws.accept()
         self._connections.setdefault(key, []).append(ws)
+        logger.info("WS connected: {} (total {})", key, sum(len(v) for v in self._connections.values()))
 
     def disconnect(self, key: str, ws: WebSocket) -> None:
         conns = self._connections.get(key, [])
@@ -31,23 +32,33 @@ class _ConnectionManager:
             conns.remove(ws)
         if not conns:
             self._connections.pop(key, None)
+        logger.info("WS disconnected: {}", key)
 
     async def send(self, key: str, data: dict) -> None:
-        for ws in list(self._connections.get(key, [])):
+        conns = list(self._connections.get(key, []))
+        if not conns:
+            logger.warning("Push to {} — no connected clients, message dropped", key)
+            return
+        for ws in conns:
             try:
                 await ws.send_json(data)
-            except Exception:
-                pass
+                logger.debug("Push delivered to {}", key)
+            except Exception as e:
+                logger.warning("Push to {} failed: {}", key, e)
+
+    def connected_keys(self) -> list[str]:
+        return list(self._connections.keys())
 
 
 def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
     """Build and return the FastAPI application."""
 
-    manager = _ConnectionManager()
+    manager = ConnectionManager()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         task = asyncio.create_task(_dispatch_outbound())
+        logger.info("Outbound dispatcher started")
         yield
         task.cancel()
         try:
@@ -61,15 +72,11 @@ def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
         """Forward bus outbound messages (e.g. cron alerts) to WebSocket clients."""
         while True:
             try:
-                # Direct await — no wait_for; Python 3.11 wait_for+Queue.get() can
-                # silently drop messages at timeout boundaries (fixed in 3.12).
                 msg: OutboundMessage = await bus.consume_outbound()
-                # Progress messages are sent inline via the WS on_progress callback;
-                # filter them out here to avoid duplicates.
                 if msg.metadata.get("_progress"):
                     continue
                 key = f"{msg.channel}:{msg.chat_id}"
-                logger.debug("Push → {}: {}", key, (msg.content or "")[:80])
+                logger.info("Dispatch push → {} ({} chars)", key, len(msg.content or ""))
                 await manager.send(key, {"type": "push", "content": msg.content})
             except asyncio.CancelledError:
                 break
@@ -101,6 +108,16 @@ def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
         agent.sessions.invalidate(session_id)
         return {"ok": True, "session_id": session_id}
 
+    # ---- Diagnostic: push a test message to verify the WS push pipeline ----
+    @app.post("/v1/test-push/{session_id}")
+    async def test_push(session_id: str, content: str = "🔔 Test push notification"):
+        """Bypass cron+LLM entirely; push directly to WebSocket clients."""
+        key = f"web:{session_id}"
+        keys = manager.connected_keys()
+        logger.info("test-push → key={}, connected_keys={}", key, keys)
+        await manager.send(key, {"type": "push", "content": content})
+        return {"ok": True, "key": key, "connected_keys": keys}
+
     # ------------------------------------------------------------------ WebSocket
     @app.websocket("/v1/ws/{session_id:path}")
     async def ws_endpoint(ws: WebSocket, session_id: str):
@@ -130,8 +147,8 @@ def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
                     msg, session_key=key, on_progress=on_progress
                 )
                 # response is None when the agent used the message tool —
-                # in that case the content is already in bus.outbound and
-                # _dispatch_outbound will push it; don't send an empty frame.
+                # the content is already in bus.outbound and _dispatch_outbound
+                # will push it; don't send an empty frame.
                 if response is not None:
                     await ws.send_json({
                         "type": "message",
