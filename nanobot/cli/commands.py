@@ -99,7 +99,8 @@ def _init_prompt_session() -> None:
     except Exception:
         pass
 
-    history_file = Path.home() / ".nanobot" / "history" / "cli_history"
+    from nanobot.utils.helpers import get_data_path
+    history_file = get_data_path() / "history" / "cli_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
     _PROMPT_SESSION = PromptSession(
@@ -732,7 +733,8 @@ def _get_bridge_dir() -> Path:
     import subprocess
 
     # User's bridge location
-    user_bridge = Path.home() / ".nanobot" / "bridge"
+    from nanobot.utils.helpers import get_data_path
+    user_bridge = get_data_path() / "bridge"
 
     # Check if already built
     if (user_bridge / "dist" / "index.js").exists():

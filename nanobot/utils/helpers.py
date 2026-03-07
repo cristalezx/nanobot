@@ -25,13 +25,15 @@ def ensure_dir(path: Path) -> Path:
 
 
 def get_data_path() -> Path:
-    """~/.nanobot data directory."""
-    return ensure_dir(Path.home() / ".nanobot")
+    """Nanobot data directory. Defaults to ~/.nanobot, overridable via NANOBOT_HOME env var."""
+    import os
+    home = os.environ.get("NANOBOT_HOME")
+    return ensure_dir(Path(home).expanduser() if home else Path.home() / ".nanobot")
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
-    """Resolve and ensure workspace path. Defaults to ~/.nanobot/workspace."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    """Resolve and ensure workspace path. Defaults to <NANOBOT_HOME>/workspace."""
+    path = Path(workspace).expanduser() if workspace else get_data_path() / "workspace"
     return ensure_dir(path)
 
 
