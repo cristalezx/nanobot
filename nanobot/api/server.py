@@ -61,14 +61,16 @@ def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
         """Forward bus outbound messages (e.g. cron alerts) to WebSocket clients."""
         while True:
             try:
-                msg: OutboundMessage = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
-                # Inline progress messages are already sent during WS processing
+                # Direct await — no wait_for; Python 3.11 wait_for+Queue.get() can
+                # silently drop messages at timeout boundaries (fixed in 3.12).
+                msg: OutboundMessage = await bus.consume_outbound()
+                # Progress messages are sent inline via the WS on_progress callback;
+                # filter them out here to avoid duplicates.
                 if msg.metadata.get("_progress"):
                     continue
                 key = f"{msg.channel}:{msg.chat_id}"
+                logger.debug("Push → {}: {}", key, (msg.content or "")[:80])
                 await manager.send(key, {"type": "push", "content": msg.content})
-            except asyncio.TimeoutError:
-                continue
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -127,10 +129,14 @@ def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
                 response = await agent._process_message(
                     msg, session_key=key, on_progress=on_progress
                 )
-                await ws.send_json({
-                    "type": "message",
-                    "content": response.content if response else "",
-                })
+                # response is None when the agent used the message tool —
+                # in that case the content is already in bus.outbound and
+                # _dispatch_outbound will push it; don't send an empty frame.
+                if response is not None:
+                    await ws.send_json({
+                        "type": "message",
+                        "content": response.content or "",
+                    })
         except WebSocketDisconnect:
             pass
         except Exception as e:

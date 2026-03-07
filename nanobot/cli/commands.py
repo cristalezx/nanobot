@@ -494,7 +494,12 @@ def serve(
 
     async def on_cron_job(job: CronJob) -> str | None:
         from nanobot.agent.tools.cron import CronTool
+        from nanobot.agent.tools.message import MessageTool
         from nanobot.bus.events import OutboundMessage as OMsg
+        from loguru import logger as _log
+
+        channel = job.payload.channel or "web"
+        chat_id = job.payload.to or "default"
         reminder_note = (
             "[Scheduled Task] Timer finished.\n\n"
             f"Task '{job.name}' has been triggered.\n"
@@ -504,22 +509,38 @@ def serve(
         token = None
         if isinstance(cron_tool, CronTool):
             token = cron_tool.set_cron_context(True)
+
+        # Silent progress: don't flood bus.outbound with _progress frames
+        async def _silent(*_args, **_kwargs):
+            pass
+
         try:
             response = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "web",
-                chat_id=job.payload.to or "default",
+                channel=channel,
+                chat_id=chat_id,
+                on_progress=_silent,
             )
+        except Exception as exc:
+            _log.error("Cron job '{}' agent processing failed: {}", job.name, exc)
+            # Fall back: push the raw scheduled message so the user sees something
+            if job.payload.deliver and chat_id:
+                await bus.publish_outbound(OMsg(channel=channel, chat_id=chat_id,
+                                               content=job.payload.message))
+            return None
         finally:
             if isinstance(cron_tool, CronTool) and token is not None:
                 cron_tool.reset_cron_context(token)
-        if job.payload.deliver and job.payload.to and response:
-            await bus.publish_outbound(OMsg(
-                channel=job.payload.channel or "web",
-                chat_id=job.payload.to or "default",
-                content=response,
-            ))
+
+        # If the agent used the message tool, the content is already on the bus
+        # via MessageTool → bus.publish_outbound → _dispatch_outbound → WebSocket.
+        # Only push here when the agent returned plain text (no tool used).
+        mt = agent.tools.get("message")
+        sent_via_tool = isinstance(mt, MessageTool) and mt._sent_in_turn
+        if not sent_via_tool and job.payload.deliver and chat_id and response:
+            await bus.publish_outbound(OMsg(channel=channel, chat_id=chat_id,
+                                           content=response))
         return response
 
     cron.on_job = on_cron_job
