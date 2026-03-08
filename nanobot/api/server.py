@@ -96,6 +96,19 @@ def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
     async def health():
         return {"status": "ok"}
 
+    @app.get("/v1/debug/system-prompt")
+    async def debug_system_prompt():
+        """Return the current system prompt and skills list (for debugging)."""
+        prompt = agent.context.build_system_prompt()
+        skills = agent.context.skills.list_skills(filter_unavailable=False)
+        always = agent.context.skills.get_always_skills()
+        return {
+            "workspace": str(agent.context.workspace),
+            "always_skills": always,
+            "all_skills": skills,
+            "system_prompt": prompt,
+        }
+
     @app.get("/v1/sessions")
     async def list_sessions():
         return {"sessions": agent.sessions.list_sessions()}
