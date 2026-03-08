@@ -140,35 +140,46 @@
 
   /* ── Collapsible steps (progress/tool) ── */
   .steps-group {
-    align-self: flex-start; max-width: 85%; margin: 2px 0;
+    align-self: flex-start; max-width: 92%; margin: 2px 0;
   }
   .steps-toggle {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     cursor: pointer; user-select: none;
-    font-size: 0.78rem; color: #888; padding: 4px 10px;
+    font-size: 0.78rem; color: #888; padding: 5px 10px;
     background: #f0f0f0; border-radius: 10px; border: none;
-    transition: background 0.15s;
+    transition: background 0.15s; text-align: left; width: 100%;
   }
-  .steps-toggle:hover { background: #e4e4e4; }
+  .steps-toggle:hover { background: #e8e8e8; }
   .steps-toggle .arrow {
     display: inline-block; transition: transform 0.2s;
-    font-size: 0.65rem;
+    font-size: 0.65rem; flex-shrink: 0;
   }
   .steps-group.collapsed .arrow { transform: rotate(-90deg); }
   .steps-group:not(.collapsed) .arrow { transform: rotate(0deg); }
+  .steps-toggle .step-summary { flex-shrink: 0; }
+  .steps-toggle .tool-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tool-chip {
+    font-size: 0.7rem; padding: 1px 7px; border-radius: 8px;
+    background: #dde; color: #4444bb; font-family: monospace;
+    border: 1px solid #cce; white-space: nowrap;
+  }
+  .steps-group.running .steps-toggle { background: #eef3ff; color: #666; }
   .steps-content {
     margin-top: 4px; padding: 0;
-    overflow: hidden; transition: max-height 0.25s ease;
+    overflow: hidden; transition: max-height 0.3s ease;
   }
   .steps-group.collapsed .steps-content {
     max-height: 0 !important;
   }
   .steps-content .step-item {
-    font-size: 0.78rem; padding: 3px 10px; margin: 2px 0;
-    border-radius: 10px; word-break: break-word;
+    font-size: 0.78rem; padding: 4px 10px; margin: 2px 0;
+    border-radius: 10px; word-break: break-word; white-space: pre-wrap;
   }
-  .step-item.progress { color: #888; background: #efefef; }
-  .step-item.tool { color: #5c5cff; background: #eef; font-family: monospace; }
+  .step-item.progress { color: #777; background: #f5f5f5; }
+  .step-item.tool {
+    color: #3030aa; background: #eef; font-family: monospace;
+    border-left: 3px solid #5c5cff; border-radius: 0 10px 10px 0; padding-left: 8px;
+  }
 
   /* ── Typing indicator ── */
   .typing {
@@ -264,6 +275,7 @@ let currentSessionId = 'default';
 // Current steps group (collapsible container for progress/tool messages)
 let currentStepsGroup = null;
 let stepsCounter = 0;
+let toolsUsed = [];  // unique tool names seen in this turn
 
 const chat      = document.getElementById('chat');
 const input     = document.getElementById('msg-input');
@@ -315,6 +327,7 @@ function switchSession(sid) {
   chat.innerHTML = '';
   currentStepsGroup = null;
   stepsCounter = 0;
+  toolsUsed = [];
   loadHistory(sid).then(() => connect());
   updateActiveSession();
 }
@@ -412,6 +425,7 @@ function reconnect() {
   chat.innerHTML = '';
   currentStepsGroup = null;
   stepsCounter = 0;
+  toolsUsed = [];
   connect();
 }
 
@@ -425,6 +439,7 @@ function sendMessage() {
   input.style.height = '';
   currentStepsGroup = null;
   stepsCounter = 0;
+  toolsUsed = [];
   showTyping();
   setBusy(true);
 }
@@ -444,6 +459,7 @@ async function clearSession() {
   chat.innerHTML = '';
   currentStepsGroup = null;
   stepsCounter = 0;
+  toolsUsed = [];
   appendSystem(`会话「${sid}」已清除`);
   loadSessionList();
 }
@@ -504,14 +520,15 @@ function ensureStepsGroup() {
   if (currentStepsGroup) return currentStepsGroup;
 
   const group = document.createElement('div');
-  group.className = 'steps-group';
+  group.className = 'steps-group running';
 
   const toggle = document.createElement('button');
   toggle.className = 'steps-toggle';
-  toggle.innerHTML = '<span class="arrow">▼</span> <span class="label">思考与工具调用中…</span>';
-  toggle.onclick = () => {
-    group.classList.toggle('collapsed');
-  };
+  toggle.innerHTML = `
+    <span class="arrow">▼</span>
+    <span class="step-summary">⏳ 思考中…</span>
+    <span class="tool-chips"></span>`;
+  toggle.onclick = () => group.classList.toggle('collapsed');
 
   const content = document.createElement('div');
   content.className = 'steps-content';
@@ -524,32 +541,70 @@ function ensureStepsGroup() {
   return group;
 }
 
+// Extract the bare tool name from hint strings like 'web_search("query")'
+function extractToolName(text) {
+  const m = text.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*[(\s"']?/);
+  return m ? m[1] : text.split(/[\s("]/)[0];
+}
+
+function updateToggleChips(group) {
+  const chipsEl = group.querySelector('.tool-chips');
+  chipsEl.innerHTML = '';
+  toolsUsed.forEach(name => {
+    const chip = document.createElement('span');
+    chip.className = 'tool-chip';
+    chip.textContent = name;
+    chipsEl.appendChild(chip);
+  });
+}
+
 function appendStep(text, isTool) {
   const group = ensureStepsGroup();
   const content = group.querySelector('.steps-content');
+
   const el = document.createElement('div');
   el.className = 'step-item ' + (isTool ? 'tool' : 'progress');
-  el.textContent = isTool ? `⚙️ ${text}` : `💭 ${text.slice(0, 300)}`;
+  el.textContent = isTool ? `⚙️ ${text}` : `💭 ${text.slice(0, 400)}`;
   content.appendChild(el);
   stepsCounter++;
 
-  // Update label with count
-  const label = group.querySelector('.steps-toggle .label');
-  label.textContent = `思考与工具调用中… (${stepsCounter} 步)`;
+  if (isTool) {
+    const toolName = extractToolName(text);
+    if (toolName && !toolsUsed.includes(toolName)) {
+      toolsUsed.push(toolName);
+    }
+    updateToggleChips(group);
+  }
 
-  // Auto-adjust content max-height for smooth transitions
-  content.style.maxHeight = content.scrollHeight + 'px';
+  // Update running summary
+  const summary = group.querySelector('.step-summary');
+  summary.textContent = `⏳ 思考中… (${stepsCounter} 步)`;
+
+  // Expand content height
+  content.style.maxHeight = content.scrollHeight + 40 + 'px';
   scrollBottom();
 }
 
+function finalizeCurrentSteps() {
+  if (!currentStepsGroup) return;
+  const group = currentStepsGroup;
+  group.classList.remove('running');
+
+  const summary = group.querySelector('.step-summary');
+  const toolLabel = toolsUsed.length
+    ? `使用了 ${toolsUsed.length} 个工具`
+    : '纯推理';
+  summary.textContent = `✅ 完成 · ${stepsCounter} 步 · ${toolLabel}`;
+
+  // Keep expanded so user can see — they can manually collapse
+  currentStepsGroup = null;
+  stepsCounter = 0;
+  toolsUsed = [];
+}
+
+// Legacy alias so message/push handlers can call it
 function collapseCurrentSteps() {
-  if (currentStepsGroup) {
-    currentStepsGroup.classList.add('collapsed');
-    const label = currentStepsGroup.querySelector('.steps-toggle .label');
-    label.textContent = `思考与工具调用 (${stepsCounter} 步)`;
-    currentStepsGroup = null;
-    stepsCounter = 0;
-  }
+  finalizeCurrentSteps();
 }
 
 function showTyping() {
