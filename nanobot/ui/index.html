@@ -16,12 +16,13 @@
   header {
     background: #1a1a2e; color: #fff; padding: 10px 16px;
     display: flex; align-items: center; gap: 10px; flex-shrink: 0;
-    box-shadow: 0 2px 6px rgba(0,0,0,.3);
+    box-shadow: 0 2px 6px rgba(0,0,0,.3); z-index: 10;
   }
-  header h1 { font-size: 1.1rem; flex: 1; }
+  header h1 { font-size: 1.1rem; white-space: nowrap; }
+  .header-spacer { flex: 1; }
   #session-input {
     background: #2a2a4e; border: 1px solid #4a4a8e; color: #ccc;
-    border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; width: 160px;
+    border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; width: 140px;
   }
   #session-input:focus { outline: none; border-color: #7c7cff; }
   .btn {
@@ -37,7 +38,59 @@
   }
   #status-dot.connected { background: #27ae60; }
 
+  /* ── Main layout: sidebar + chat ── */
+  #main {
+    flex: 1; display: flex; overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: 240px; min-width: 240px; background: #1e1e3a; color: #ccc;
+    display: flex; flex-direction: column; flex-shrink: 0;
+    border-right: 1px solid #2a2a4e; overflow: hidden;
+    transition: margin-left 0.25s ease;
+  }
+  #sidebar.collapsed {
+    margin-left: -240px;
+  }
+  #sidebar-header {
+    padding: 12px 14px; font-size: 0.85rem; font-weight: 600;
+    color: #aaa; border-bottom: 1px solid #2a2a4e;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  #sidebar-header button {
+    background: none; border: none; color: #888; cursor: pointer;
+    font-size: 1rem; padding: 2px 6px; border-radius: 4px;
+  }
+  #sidebar-header button:hover { background: #2a2a4e; color: #fff; }
+  #session-list {
+    flex: 1; overflow-y: auto; padding: 6px 0;
+  }
+  .session-item {
+    padding: 10px 14px; cursor: pointer; font-size: 0.82rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    display: flex; flex-direction: column; gap: 2px;
+    transition: background 0.15s;
+  }
+  .session-item:hover { background: #2a2a4e; }
+  .session-item.active { background: #3a3a6e; border-left: 3px solid #5c5cff; }
+  .session-item .session-name {
+    font-weight: 500; color: #e0e0e0; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .session-item .session-time {
+    font-size: 0.72rem; color: #777;
+  }
+  #toggle-sidebar {
+    background: none; border: none; color: #aaa; cursor: pointer;
+    font-size: 1.1rem; padding: 0 6px; display: flex; align-items: center;
+  }
+  #toggle-sidebar:hover { color: #fff; }
+
   /* ── Chat area ── */
+  #chat-wrapper {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  }
   #chat {
     flex: 1; overflow-y: auto; padding: 16px;
     display: flex; flex-direction: column; gap: 12px;
@@ -85,17 +138,37 @@
   .msg.user .bubble pre { background: #4444cc; }
   .msg.user .bubble code { color: #ffe; }
 
-  /* ── Progress / thinking ── */
-  .progress-line {
-    align-self: flex-start; font-size: 0.78rem; color: #888;
-    padding: 4px 10px; background: #efefef; border-radius: 12px;
-    max-width: 80%; white-space: pre-wrap; word-break: break-word;
+  /* ── Collapsible steps (progress/tool) ── */
+  .steps-group {
+    align-self: flex-start; max-width: 85%; margin: 2px 0;
   }
-  .tool-line {
-    align-self: flex-start; font-size: 0.78rem; color: #5c5cff;
-    padding: 3px 10px; background: #eef; border-radius: 12px;
-    font-family: monospace;
+  .steps-toggle {
+    display: flex; align-items: center; gap: 6px;
+    cursor: pointer; user-select: none;
+    font-size: 0.78rem; color: #888; padding: 4px 10px;
+    background: #f0f0f0; border-radius: 10px; border: none;
+    transition: background 0.15s;
   }
+  .steps-toggle:hover { background: #e4e4e4; }
+  .steps-toggle .arrow {
+    display: inline-block; transition: transform 0.2s;
+    font-size: 0.65rem;
+  }
+  .steps-group.collapsed .arrow { transform: rotate(-90deg); }
+  .steps-group:not(.collapsed) .arrow { transform: rotate(0deg); }
+  .steps-content {
+    margin-top: 4px; padding: 0;
+    overflow: hidden; transition: max-height 0.25s ease;
+  }
+  .steps-group.collapsed .steps-content {
+    max-height: 0 !important;
+  }
+  .steps-content .step-item {
+    font-size: 0.78rem; padding: 3px 10px; margin: 2px 0;
+    border-radius: 10px; word-break: break-word;
+  }
+  .step-item.progress { color: #888; background: #efefef; }
+  .step-item.tool { color: #5c5cff; background: #eef; font-family: monospace; }
 
   /* ── Typing indicator ── */
   .typing {
@@ -132,26 +205,52 @@
   }
   #send-btn:hover { background: #4444dd; }
   #send-btn:disabled { background: #aaa; cursor: default; }
+
+  /* ── History loading ── */
+  .history-divider {
+    align-self: center; font-size: 0.75rem; color: #aaa;
+    padding: 4px 16px; background: #eee; border-radius: 10px;
+    margin: 4px 0;
+  }
+
+  /* ── Responsive: hide sidebar on small screens ── */
+  @media (max-width: 600px) {
+    #sidebar { position: absolute; top: 0; left: 0; bottom: 0; z-index: 20; }
+    #sidebar.collapsed { margin-left: -240px; }
+  }
 </style>
 </head>
 <body>
 
 <!-- Header -->
 <header>
+  <button id="toggle-sidebar" onclick="toggleSidebar()" title="切换侧边栏">☰</button>
   <div id="status-dot" title="WebSocket 状态"></div>
   <h1>🐈 nanobot</h1>
-  <input id="session-input" type="text" value="default" placeholder="会话 ID" title="会话 ID（不同 ID 对应独立上下文）">
-  <button class="btn" onclick="reconnect()">切换会话</button>
+  <div class="header-spacer"></div>
+  <input id="session-input" type="text" value="default" placeholder="新会话 ID" title="输入新会话 ID">
+  <button class="btn" onclick="createAndSwitch()">新建会话</button>
   <button class="btn danger" onclick="clearSession()">清除</button>
 </header>
 
-<!-- Chat messages -->
-<div id="chat"></div>
+<div id="main">
+  <!-- Sidebar: session list -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <span>会话列表</span>
+      <button onclick="loadSessionList()" title="刷新">↻</button>
+    </div>
+    <div id="session-list"></div>
+  </div>
 
-<!-- Input -->
-<div id="input-bar">
-  <textarea id="msg-input" rows="1" placeholder="输入消息，Shift+Enter 换行，Enter 发送…"></textarea>
-  <button id="send-btn" onclick="sendMessage()">发送</button>
+  <!-- Chat area -->
+  <div id="chat-wrapper">
+    <div id="chat"></div>
+    <div id="input-bar">
+      <textarea id="msg-input" rows="1" placeholder="输入消息，Shift+Enter 换行，Enter 发送…"></textarea>
+      <button id="send-btn" onclick="sendMessage()">发送</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -160,22 +259,121 @@ marked.setOptions({ breaks: true, gfm: true });
 let ws = null;
 let busy = false;
 let typingEl = null;
+let currentSessionId = 'default';
+
+// Current steps group (collapsible container for progress/tool messages)
+let currentStepsGroup = null;
+let stepsCounter = 0;
 
 const chat      = document.getElementById('chat');
 const input     = document.getElementById('msg-input');
 const sendBtn   = document.getElementById('send-btn');
 const dot       = document.getElementById('status-dot');
 const sessInput = document.getElementById('session-input');
+const sidebar   = document.getElementById('sidebar');
+const sessionList = document.getElementById('session-list');
+
+// ── Sidebar ──────────────────────────────────────────────────────────────
+function toggleSidebar() {
+  sidebar.classList.toggle('collapsed');
+}
+
+async function loadSessionList() {
+  try {
+    const res = await fetch('/v1/sessions');
+    const data = await res.json();
+    const sessions = data.sessions || [];
+    sessionList.innerHTML = '';
+
+    // Filter web sessions only
+    const webSessions = sessions.filter(s => s.key && s.key.startsWith('web:'));
+
+    if (webSessions.length === 0) {
+      sessionList.innerHTML = '<div style="padding:14px;color:#666;font-size:0.8rem;">暂无会话</div>';
+      return;
+    }
+
+    webSessions.forEach(s => {
+      const sid = s.key.replace('web:', '');
+      const el = document.createElement('div');
+      el.className = 'session-item' + (sid === currentSessionId ? ' active' : '');
+      const updatedAt = s.updated_at ? new Date(s.updated_at).toLocaleString('zh-CN') : '';
+      el.innerHTML = `<span class="session-name">${escapeHtml(sid)}</span>
+        <span class="session-time">${updatedAt}</span>`;
+      el.onclick = () => switchSession(sid);
+      sessionList.appendChild(el);
+    });
+  } catch (e) {
+    console.error('Failed to load sessions:', e);
+  }
+}
+
+function switchSession(sid) {
+  currentSessionId = sid;
+  sessInput.value = sid;
+  if (ws) ws.close();
+  chat.innerHTML = '';
+  currentStepsGroup = null;
+  stepsCounter = 0;
+  loadHistory(sid).then(() => connect());
+  updateActiveSession();
+}
+
+function createAndSwitch() {
+  const sid = sessInput.value.trim();
+  if (!sid) return;
+  switchSession(sid);
+}
+
+function updateActiveSession() {
+  document.querySelectorAll('.session-item').forEach(el => {
+    const name = el.querySelector('.session-name').textContent;
+    el.classList.toggle('active', name === currentSessionId);
+  });
+}
+
+// ── Load chat history ────────────────────────────────────────────────────
+async function loadHistory(sid) {
+  try {
+    const res = await fetch(`/v1/sessions/web:${encodeURIComponent(sid)}/messages`);
+    const data = await res.json();
+    const messages = data.messages || [];
+    if (messages.length === 0) return;
+
+    const divider = document.createElement('div');
+    divider.className = 'history-divider';
+    divider.textContent = `── 历史记录 (${messages.length} 条) ──`;
+    chat.appendChild(divider);
+
+    messages.forEach(m => {
+      if (m.role === 'user') {
+        appendUser(m.content, true);
+      } else if (m.role === 'assistant') {
+        appendBot(m.content, true);
+      }
+    });
+
+    const endDivider = document.createElement('div');
+    endDivider.className = 'history-divider';
+    endDivider.textContent = '── 历史记录结束 ──';
+    chat.appendChild(endDivider);
+
+    scrollBottom();
+  } catch (e) {
+    console.error('Failed to load history:', e);
+  }
+}
 
 // ── WebSocket ────────────────────────────────────────────────────────────
 function connect() {
-  const sid = sessInput.value.trim() || 'default';
+  const sid = currentSessionId;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/v1/ws/${sid}`);
 
   ws.onopen = () => {
     dot.className = 'connected';
     appendSystem(`已连接到会话「${sid}」`);
+    loadSessionList();
   };
 
   ws.onclose = () => {
@@ -190,17 +388,19 @@ function connect() {
     const msg = JSON.parse(e.data);
     if (msg.type === 'progress') {
       removeTyping();
-      appendProgress(msg.content, false);
+      appendStep(msg.content, false);
     } else if (msg.type === 'tool') {
       removeTyping();
-      appendProgress(msg.content, true);
+      appendStep(msg.content, true);
     } else if (msg.type === 'message') {
-      removeTyping(); removeProgress();
+      removeTyping();
+      collapseCurrentSteps();
       appendBot(msg.content);
       setBusy(false);
+      loadSessionList();  // refresh sidebar timestamps
     } else if (msg.type === 'push') {
-      // Server-initiated push (e.g. cron notifications)
-      removeTyping(); removeProgress();
+      removeTyping();
+      collapseCurrentSteps();
       appendPush(msg.content);
       setBusy(false);
     }
@@ -210,6 +410,8 @@ function connect() {
 function reconnect() {
   if (ws) ws.close();
   chat.innerHTML = '';
+  currentStepsGroup = null;
+  stepsCounter = 0;
   connect();
 }
 
@@ -221,6 +423,8 @@ function sendMessage() {
   ws.send(JSON.stringify({ content: text }));
   input.value = '';
   input.style.height = '';
+  currentStepsGroup = null;
+  stepsCounter = 0;
   showTyping();
   setBusy(true);
 }
@@ -235,10 +439,13 @@ input.addEventListener('input', () => {
 
 // ── Session clear ─────────────────────────────────────────────────────────
 async function clearSession() {
-  const sid = sessInput.value.trim() || 'default';
+  const sid = currentSessionId;
   await fetch(`/v1/sessions/web:${sid}`, { method: 'DELETE' });
   chat.innerHTML = '';
+  currentStepsGroup = null;
+  stepsCounter = 0;
   appendSystem(`会话「${sid}」已清除`);
+  loadSessionList();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -255,22 +462,24 @@ function renderMarkdown(md) {
   return marked.parse(md || '');
 }
 
-function appendUser(text) {
+function appendUser(text, isHistory) {
   const el = document.createElement('div');
   el.className = 'msg user';
+  if (isHistory) el.style.opacity = '0.85';
   el.innerHTML = `<div class="avatar">👤</div>
     <div class="bubble">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
   chat.appendChild(el);
-  scrollBottom();
+  if (!isHistory) scrollBottom();
 }
 
-function appendBot(text) {
+function appendBot(text, isHistory) {
   const el = document.createElement('div');
   el.className = 'msg bot';
+  if (isHistory) el.style.opacity = '0.85';
   el.innerHTML = `<div class="avatar">🐈</div>
     <div class="bubble">${renderMarkdown(text)}</div>`;
   chat.appendChild(el);
-  scrollBottom();
+  if (!isHistory) scrollBottom();
 }
 
 function appendPush(text) {
@@ -284,24 +493,63 @@ function appendPush(text) {
 
 function appendSystem(text) {
   const el = document.createElement('div');
-  el.className = 'progress-line';
+  el.className = 'history-divider';
   el.textContent = `ℹ️ ${text}`;
   chat.appendChild(el);
   scrollBottom();
 }
 
-let progressEls = [];
-function appendProgress(text, isTool) {
+// ── Collapsible steps (progress + tool) ─────────────────────────────────
+function ensureStepsGroup() {
+  if (currentStepsGroup) return currentStepsGroup;
+
+  const group = document.createElement('div');
+  group.className = 'steps-group';
+
+  const toggle = document.createElement('button');
+  toggle.className = 'steps-toggle';
+  toggle.innerHTML = '<span class="arrow">▼</span> <span class="label">思考与工具调用中…</span>';
+  toggle.onclick = () => {
+    group.classList.toggle('collapsed');
+  };
+
+  const content = document.createElement('div');
+  content.className = 'steps-content';
+
+  group.appendChild(toggle);
+  group.appendChild(content);
+  chat.appendChild(group);
+  currentStepsGroup = group;
+  stepsCounter = 0;
+  return group;
+}
+
+function appendStep(text, isTool) {
+  const group = ensureStepsGroup();
+  const content = group.querySelector('.steps-content');
   const el = document.createElement('div');
-  el.className = isTool ? 'tool-line' : 'progress-line';
-  el.textContent = isTool ? `⚙️ ${text}` : `💭 ${text.slice(0, 200)}`;
-  chat.appendChild(el);
-  progressEls.push(el);
+  el.className = 'step-item ' + (isTool ? 'tool' : 'progress');
+  el.textContent = isTool ? `⚙️ ${text}` : `💭 ${text.slice(0, 300)}`;
+  content.appendChild(el);
+  stepsCounter++;
+
+  // Update label with count
+  const label = group.querySelector('.steps-toggle .label');
+  label.textContent = `思考与工具调用中… (${stepsCounter} 步)`;
+
+  // Auto-adjust content max-height for smooth transitions
+  content.style.maxHeight = content.scrollHeight + 'px';
   scrollBottom();
 }
-function removeProgress() {
-  progressEls.forEach(el => el.remove());
-  progressEls = [];
+
+function collapseCurrentSteps() {
+  if (currentStepsGroup) {
+    currentStepsGroup.classList.add('collapsed');
+    const label = currentStepsGroup.querySelector('.steps-toggle .label');
+    label.textContent = `思考与工具调用 (${stepsCounter} 步)`;
+    currentStepsGroup = null;
+    stepsCounter = 0;
+  }
 }
 
 function showTyping() {
@@ -321,7 +569,8 @@ function escapeHtml(t) {
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
-connect();
+loadSessionList();
+loadHistory(currentSessionId).then(() => connect());
 </script>
 </body>
 </html>

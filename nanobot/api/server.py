@@ -108,6 +108,18 @@ def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
         agent.sessions.invalidate(session_id)
         return {"ok": True, "session_id": session_id}
 
+    @app.get("/v1/sessions/{session_id:path}/messages")
+    async def get_session_messages(session_id: str):
+        """Return user/assistant message pairs for chat history display."""
+        session = agent.sessions.get_or_create(session_id)
+        history = []
+        for m in session.messages:
+            role = m.get("role")
+            content = m.get("content", "")
+            if role in ("user", "assistant") and content:
+                history.append({"role": role, "content": content})
+        return {"messages": history}
+
     # ---- Diagnostic: push a test message to verify the WS push pipeline ----
     @app.post("/v1/test-push/{session_id}")
     async def test_push(session_id: str, content: str = "🔔 Test push notification"):
