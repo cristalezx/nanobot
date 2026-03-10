@@ -163,6 +163,11 @@
     background: #dde; color: #4444bb; font-family: monospace;
     border: 1px solid #cce; white-space: nowrap;
   }
+  .skill-chip {
+    font-size: 0.7rem; padding: 1px 7px; border-radius: 8px;
+    background: #e8f5e9; color: #2e7d32; font-family: monospace;
+    border: 1px solid #c8e6c9; white-space: nowrap;
+  }
   .steps-group.running .steps-toggle { background: #eef3ff; color: #666; }
   .steps-content {
     margin-top: 4px; padding: 0;
@@ -275,7 +280,8 @@ let currentSessionId = 'default';
 // Current steps group (collapsible container for progress/tool messages)
 let currentStepsGroup = null;
 let stepsCounter = 0;
-let toolsUsed = [];  // unique tool names seen in this turn
+let toolsUsed = [];   // unique tool names seen in this turn
+let skillsUsed = [];  // unique skill names seen in this turn
 
 const chat      = document.getElementById('chat');
 const input     = document.getElementById('msg-input');
@@ -405,6 +411,9 @@ function connect() {
     } else if (msg.type === 'tool') {
       removeTyping();
       appendStep(msg.content, true);
+    } else if (msg.type === 'skill') {
+      removeTyping();
+      appendSkillUsed(msg.content);
     } else if (msg.type === 'message') {
       removeTyping();
       collapseCurrentSteps();
@@ -426,6 +435,7 @@ function reconnect() {
   currentStepsGroup = null;
   stepsCounter = 0;
   toolsUsed = [];
+  skillsUsed = [];
   connect();
 }
 
@@ -440,6 +450,7 @@ function sendMessage() {
   currentStepsGroup = null;
   stepsCounter = 0;
   toolsUsed = [];
+  skillsUsed = [];
   showTyping();
   setBusy(true);
 }
@@ -550,12 +561,26 @@ function extractToolName(text) {
 function updateToggleChips(group) {
   const chipsEl = group.querySelector('.tool-chips');
   chipsEl.innerHTML = '';
+  skillsUsed.forEach(name => {
+    const chip = document.createElement('span');
+    chip.className = 'skill-chip';
+    chip.textContent = '✦ ' + name;
+    chipsEl.appendChild(chip);
+  });
   toolsUsed.forEach(name => {
     const chip = document.createElement('span');
     chip.className = 'tool-chip';
     chip.textContent = name;
     chipsEl.appendChild(chip);
   });
+}
+
+function appendSkillUsed(skillName) {
+  if (!skillsUsed.includes(skillName)) {
+    skillsUsed.push(skillName);
+  }
+  const group = ensureStepsGroup();
+  updateToggleChips(group);
 }
 
 function appendStep(text, isTool) {
@@ -591,15 +616,17 @@ function finalizeCurrentSteps() {
   group.classList.remove('running');
 
   const summary = group.querySelector('.step-summary');
-  const toolLabel = toolsUsed.length
-    ? `使用了 ${toolsUsed.length} 个工具`
-    : '纯推理';
+  const parts = [];
+  if (skillsUsed.length) parts.push(`${skillsUsed.length} 个技能`);
+  if (toolsUsed.length) parts.push(`${toolsUsed.length} 个工具`);
+  const toolLabel = parts.length ? `使用了 ${parts.join(' · ')}` : '纯推理';
   summary.textContent = `✅ 完成 · ${stepsCounter} 步 · ${toolLabel}`;
 
   // Keep expanded so user can see — they can manually collapse
   currentStepsGroup = null;
   stepsCounter = 0;
   toolsUsed = [];
+  skillsUsed = [];
 }
 
 // Legacy alias so message/push handlers can call it

@@ -156,11 +156,14 @@ def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
                 if not content:
                     continue
 
-                async def on_progress(text: str, *, tool_hint: bool = False) -> None:
-                    await ws.send_json({
-                        "type": "tool" if tool_hint else "progress",
-                        "content": text,
-                    })
+                async def on_progress(text: str, *, tool_hint: bool = False, skill_hint: bool = False) -> None:
+                    if skill_hint:
+                        msg_type = "skill"
+                    elif tool_hint:
+                        msg_type = "tool"
+                    else:
+                        msg_type = "progress"
+                    await ws.send_json({"type": msg_type, "content": text})
 
                 msg = InboundMessage(
                     channel=channel,
