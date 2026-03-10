@@ -50,7 +50,7 @@ class ConnectionManager:
         return list(self._connections.keys())
 
 
-def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
+def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path, heartbeat=None) -> FastAPI:
     """Build and return the FastAPI application."""
 
     manager = ConnectionManager()
@@ -108,6 +108,14 @@ def create_app(agent: AgentLoop, bus: MessageBus, ui_path: Path) -> FastAPI:
             "all_skills": skills,
             "system_prompt": prompt,
         }
+
+    @app.post("/v1/heartbeat/trigger")
+    async def trigger_heartbeat():
+        """Manually trigger one heartbeat tick (for testing)."""
+        if heartbeat is None:
+            return JSONResponse({"error": "heartbeat not running"}, status_code=503)
+        result = await heartbeat.trigger_now()
+        return {"triggered": True, "result": result or "(no active tasks)"}
 
     @app.get("/v1/sessions")
     async def list_sessions():

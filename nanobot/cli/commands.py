@@ -457,6 +457,7 @@ def serve(
     from nanobot.config.loader import load_config
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
+    from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
     config_path = Path(config) if config else None
@@ -509,12 +510,48 @@ def serve(
 
     cron.on_job = on_cron_job
 
+    def _pick_web_target() -> str:
+        """Pick the most recently active web session id."""
+        for item in session_manager.list_sessions():
+            key = item.get("key", "")
+            if key.startswith("web:"):
+                return key.split(":", 1)[1]
+        return "default"
+
+    async def on_heartbeat_execute(tasks: str) -> str:
+        chat_id = _pick_web_target()
+        async def _silent(*_a, **_kw): pass
+        return await agent.process_direct(
+            tasks,
+            session_key=f"web:{chat_id}",
+            channel="web",
+            chat_id=chat_id,
+            on_progress=_silent,
+        )
+
+    async def on_heartbeat_notify(response: str) -> None:
+        from nanobot.bus.events import OutboundMessage
+        chat_id = _pick_web_target()
+        await bus.publish_outbound(OutboundMessage(channel="web", chat_id=chat_id, content=response))
+
+    hb_cfg = cfg.gateway.heartbeat
+    heartbeat = HeartbeatService(
+        workspace=cfg.workspace_path,
+        provider=provider,
+        model=cfg.agents.defaults.model,
+        on_execute=on_heartbeat_execute,
+        on_notify=on_heartbeat_notify,
+        interval_s=hb_cfg.interval_s,
+        enabled=hb_cfg.enabled,
+    )
+
     ui_path = Path(__file__).parent.parent / "ui"
-    fast_app = create_app(agent, bus, ui_path)
+    fast_app = create_app(agent, bus, ui_path, heartbeat=heartbeat)
 
     async def run():
         try:
             await cron.start()
+            await heartbeat.start()
             await agent._connect_mcp()
             server = uvicorn.Server(uvicorn.Config(
                 fast_app, host=host, port=port, log_level="warning"
@@ -523,6 +560,7 @@ def serve(
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
+            heartbeat.stop()
             cron.stop()
             await agent.close_mcp()
 

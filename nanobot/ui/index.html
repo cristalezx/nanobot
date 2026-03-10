@@ -246,6 +246,7 @@
   <div class="header-spacer"></div>
   <input id="session-input" type="text" value="default" placeholder="新会话 ID" title="输入新会话 ID">
   <button class="btn" onclick="createAndSwitch()">新建会话</button>
+  <button class="btn" onclick="triggerHeartbeat()" title="立即触发一次心跳（测试用）">⚡ 心跳</button>
   <button class="btn danger" onclick="clearSession()">清除</button>
 </header>
 
@@ -473,6 +474,21 @@ async function clearSession() {
   toolsUsed = [];
   appendSystem(`会话「${sid}」已清除`);
   loadSessionList();
+}
+
+async function triggerHeartbeat() {
+  try {
+    appendSystem('⚡ 触发心跳中…');
+    const res = await fetch('/v1/heartbeat/trigger', { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      appendSystem(`心跳触发失败：${data.error}`);
+    } else {
+      appendSystem(`心跳已触发，结果将以推送形式送达（若有任务）`);
+    }
+  } catch (e) {
+    appendSystem('心跳请求失败，请检查服务是否运行');
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
