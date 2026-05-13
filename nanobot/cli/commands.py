@@ -443,6 +443,7 @@ def serve(
     port: int = typer.Option(8080, "--port", "-p", help="Port to listen on"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    password: str | None = typer.Option(None, "--password", help="Optional UI password"),
 ):
     """Start the nanobot web API server with chat UI."""
     try:
@@ -546,7 +547,7 @@ def serve(
     )
 
     ui_path = Path(__file__).parent.parent / "ui"
-    fast_app = create_app(agent, bus, ui_path, heartbeat=heartbeat)
+    fast_app = create_app(agent, bus, ui_path, heartbeat=heartbeat, password=password)
 
     async def run():
         try:

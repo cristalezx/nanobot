@@ -12,6 +12,65 @@
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
          background: #f5f5f5; height: 100vh; display: flex; flex-direction: column; }
 
+  /* ── Auth Modal ── */
+  #auth-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  #auth-overlay.hidden { display: none; }
+  #auth-box {
+    background: #fff; border-radius: 14px; padding: 32px 36px;
+    width: 320px; box-shadow: 0 8px 40px rgba(0,0,0,.3);
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  #auth-box h2 { font-size: 1.2rem; color: #1a1a2e; text-align: center; }
+  #auth-box p { font-size: 0.85rem; color: #666; text-align: center; }
+  #auth-password {
+    border: 1px solid #ddd; border-radius: 8px; padding: 10px 14px;
+    font-size: 0.95rem; outline: none; width: 100%;
+  }
+  #auth-password:focus { border-color: #5c5cff; }
+  #auth-submit {
+    background: #5c5cff; color: #fff; border: none; border-radius: 8px;
+    padding: 10px; font-size: 0.95rem; cursor: pointer; width: 100%;
+  }
+  #auth-submit:hover { background: #4444dd; }
+  #auth-error { color: #c0392b; font-size: 0.82rem; text-align: center; min-height: 18px; }
+
+  /* ── File Content Modal ── */
+  #file-modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 900;
+  }
+  #file-modal-overlay.hidden { display: none; }
+  #file-modal {
+    background: #fff; border-radius: 12px; width: 80vw; max-width: 860px;
+    max-height: 80vh; display: flex; flex-direction: column;
+    box-shadow: 0 8px 40px rgba(0,0,0,.25);
+  }
+  #file-modal-header {
+    padding: 12px 16px; border-bottom: 1px solid #eee;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  #file-modal-title { font-size: 0.9rem; font-weight: 600; color: #333;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #file-modal-close {
+    background: none; border: none; font-size: 1.3rem; cursor: pointer;
+    color: #888; padding: 0 4px;
+  }
+  #file-modal-close:hover { color: #333; }
+  #file-modal-body {
+    flex: 1; overflow: auto; padding: 16px;
+  }
+  #file-modal-body pre {
+    font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.82rem;
+    white-space: pre-wrap; word-break: break-all; line-height: 1.5;
+    color: #333;
+  }
+
   /* ── Header ── */
   header {
     background: #1a1a2e; color: #fff; padding: 10px 16px;
@@ -53,10 +112,28 @@
   #sidebar.collapsed {
     margin-left: -240px;
   }
+
+  /* ── Sidebar Tabs ── */
+  #sidebar-tabs {
+    display: flex; border-bottom: 1px solid #2a2a4e; flex-shrink: 0;
+  }
+  .tab-btn {
+    flex: 1; background: none; border: none; color: #888;
+    padding: 10px 0; font-size: 0.82rem; cursor: pointer;
+    border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: #ccc; }
+  .tab-btn.active { color: #5c5cff; border-bottom-color: #5c5cff; }
+
+  /* ── Sessions Panel ── */
+  #panel-sessions {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  }
   #sidebar-header {
-    padding: 12px 14px; font-size: 0.85rem; font-weight: 600;
+    padding: 10px 14px; font-size: 0.85rem; font-weight: 600;
     color: #aaa; border-bottom: 1px solid #2a2a4e;
     display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
   }
   #sidebar-header button {
     background: none; border: none; color: #888; cursor: pointer;
@@ -67,13 +144,16 @@
     flex: 1; overflow-y: auto; padding: 6px 0;
   }
   .session-item {
-    padding: 10px 14px; cursor: pointer; font-size: 0.82rem;
+    padding: 8px 14px; cursor: pointer; font-size: 0.82rem;
     border-bottom: 1px solid rgba(255,255,255,0.04);
-    display: flex; flex-direction: column; gap: 2px;
+    display: flex; align-items: center; gap: 6px;
     transition: background 0.15s;
   }
   .session-item:hover { background: #2a2a4e; }
   .session-item.active { background: #3a3a6e; border-left: 3px solid #5c5cff; }
+  .session-item-info {
+    flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  }
   .session-item .session-name {
     font-weight: 500; color: #e0e0e0; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
@@ -81,6 +161,46 @@
   .session-item .session-time {
     font-size: 0.72rem; color: #777;
   }
+  .session-del-btn {
+    background: none; border: none; color: #666; cursor: pointer;
+    font-size: 0.85rem; padding: 2px 5px; border-radius: 4px;
+    flex-shrink: 0; line-height: 1; opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+  }
+  .session-item:hover .session-del-btn { opacity: 1; }
+  .session-del-btn:hover { color: #e74c3c; background: rgba(231,76,60,.15); }
+
+  /* ── Files Panel ── */
+  #panel-files {
+    flex: 1; display: none; flex-direction: column; overflow: hidden;
+  }
+  #panel-files.active { display: flex; }
+  #files-breadcrumb {
+    padding: 8px 12px; font-size: 0.78rem; color: #aaa;
+    border-bottom: 1px solid #2a2a4e; flex-shrink: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #files-breadcrumb span {
+    cursor: pointer; color: #7c7cff;
+  }
+  #files-breadcrumb span:hover { text-decoration: underline; }
+  #files-list {
+    flex: 1; overflow-y: auto; padding: 4px 0;
+  }
+  .file-item {
+    padding: 7px 12px; cursor: pointer; font-size: 0.8rem;
+    display: flex; align-items: center; gap: 8px; color: #ccc;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    transition: background 0.15s;
+  }
+  .file-item:hover { background: #2a2a4e; }
+  .file-item .file-icon { flex-shrink: 0; font-size: 0.9rem; }
+  .file-item .file-name {
+    flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .file-item .file-size { font-size: 0.7rem; color: #666; flex-shrink: 0; }
+
+  /* ── Sidebar toggle ── */
   #toggle-sidebar {
     background: none; border: none; color: #aaa; cursor: pointer;
     font-size: 1.1rem; padding: 0 6px; display: flex; align-items: center;
@@ -138,7 +258,7 @@
   .msg.user .bubble pre { background: #4444cc; }
   .msg.user .bubble code { color: #ffe; }
 
-  /* ── Collapsible steps (progress/tool) ── */
+  /* ── Collapsible steps ── */
   .steps-group {
     align-self: flex-start; max-width: 92%; margin: 2px 0;
   }
@@ -222,14 +342,14 @@
   #send-btn:hover { background: #4444dd; }
   #send-btn:disabled { background: #aaa; cursor: default; }
 
-  /* ── History loading ── */
+  /* ── History divider ── */
   .history-divider {
     align-self: center; font-size: 0.75rem; color: #aaa;
     padding: 4px 16px; background: #eee; border-radius: 10px;
     margin: 4px 0;
   }
 
-  /* ── Responsive: hide sidebar on small screens ── */
+  /* ── Responsive ── */
   @media (max-width: 600px) {
     #sidebar { position: absolute; top: 0; left: 0; bottom: 0; z-index: 20; }
     #sidebar.collapsed { margin-left: -240px; }
@@ -237,6 +357,28 @@
 </style>
 </head>
 <body>
+
+<!-- Auth Modal -->
+<div id="auth-overlay" class="hidden">
+  <div id="auth-box">
+    <h2>🐈 nanobot</h2>
+    <p>请输入访问密码</p>
+    <input id="auth-password" type="password" placeholder="密码" autocomplete="current-password">
+    <div id="auth-error"></div>
+    <button id="auth-submit" onclick="submitAuth()">进入</button>
+  </div>
+</div>
+
+<!-- File Content Modal -->
+<div id="file-modal-overlay" class="hidden">
+  <div id="file-modal">
+    <div id="file-modal-header">
+      <span id="file-modal-title"></span>
+      <button id="file-modal-close" onclick="closeFileModal()">✕</button>
+    </div>
+    <div id="file-modal-body"><pre id="file-modal-content"></pre></div>
+  </div>
+</div>
 
 <!-- Header -->
 <header>
@@ -251,13 +393,28 @@
 </header>
 
 <div id="main">
-  <!-- Sidebar: session list -->
+  <!-- Sidebar -->
   <div id="sidebar">
-    <div id="sidebar-header">
-      <span>会话列表</span>
-      <button onclick="loadSessionList()" title="刷新">↻</button>
+    <!-- Tabs -->
+    <div id="sidebar-tabs">
+      <button class="tab-btn active" onclick="switchTab('sessions')">会话</button>
+      <button class="tab-btn" onclick="switchTab('files')">文件</button>
     </div>
-    <div id="session-list"></div>
+
+    <!-- Sessions Panel -->
+    <div id="panel-sessions">
+      <div id="sidebar-header">
+        <span>会话列表</span>
+        <button onclick="loadSessionList()" title="刷新">↻</button>
+      </div>
+      <div id="session-list"></div>
+    </div>
+
+    <!-- Files Panel -->
+    <div id="panel-files">
+      <div id="files-breadcrumb"></div>
+      <div id="files-list"></div>
+    </div>
   </div>
 
   <!-- Chat area -->
@@ -277,49 +434,157 @@ let ws = null;
 let busy = false;
 let typingEl = null;
 let currentSessionId = 'default';
+let authToken = sessionStorage.getItem('nanobotToken') || '';
 
-// Current steps group (collapsible container for progress/tool messages)
+// Steps tracking
 let currentStepsGroup = null;
 let stepsCounter = 0;
-let toolsUsed = [];   // unique tool names seen in this turn
-let skillsUsed = [];  // unique skill names seen in this turn
+let toolsUsed = [];
+let skillsUsed = [];
 
-const chat      = document.getElementById('chat');
-const input     = document.getElementById('msg-input');
-const sendBtn   = document.getElementById('send-btn');
-const dot       = document.getElementById('status-dot');
-const sessInput = document.getElementById('session-input');
-const sidebar   = document.getElementById('sidebar');
+// File browser state
+let currentFilePath = '';
+
+const chat        = document.getElementById('chat');
+const input       = document.getElementById('msg-input');
+const sendBtn     = document.getElementById('send-btn');
+const dot         = document.getElementById('status-dot');
+const sessInput   = document.getElementById('session-input');
+const sidebar     = document.getElementById('sidebar');
 const sessionList = document.getElementById('session-list');
 
-// ── Sidebar ──────────────────────────────────────────────────────────────
+// ── Auth helpers ─────────────────────────────────────────────────────────
+function apiFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (authToken) headers['X-Token'] = authToken;
+  return fetch(url, { ...options, headers });
+}
+
+function wsUrl(sid) {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const base = `${proto}://${location.host}/v1/ws/${encodeURIComponent(sid)}`;
+  return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
+}
+
+// ── Boot / Auth flow ─────────────────────────────────────────────────────
+async function boot() {
+  try {
+    const res = await fetch('/v1/auth/required');
+    const data = await res.json();
+    if (!data.required) {
+      // No password set — fetch a dummy token so all requests work uniformly
+      const r = await fetch('/v1/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const d = await r.json();
+      authToken = d.token || '';
+      sessionStorage.setItem('nanobotToken', authToken);
+      init();
+      return;
+    }
+    // Auth required — validate existing token first
+    if (authToken) {
+      const probe = await apiFetch('/v1/sessions');
+      if (probe.ok) { init(); return; }
+      // Token invalid or expired
+      authToken = '';
+      sessionStorage.removeItem('nanobotToken');
+    }
+    showAuthModal();
+  } catch (e) {
+    console.error('Boot error:', e);
+    showAuthModal();
+  }
+}
+
+function showAuthModal() {
+  document.getElementById('auth-overlay').classList.remove('hidden');
+  document.getElementById('auth-password').focus();
+}
+
+async function submitAuth() {
+  const pw = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = '';
+  try {
+    const res = await fetch('/v1/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      authToken = data.token || '';
+      sessionStorage.setItem('nanobotToken', authToken);
+      document.getElementById('auth-overlay').classList.add('hidden');
+      init();
+    } else {
+      errEl.textContent = '密码错误，请重试';
+      document.getElementById('auth-password').select();
+    }
+  } catch (e) {
+    errEl.textContent = '请求失败，请检查网络';
+  }
+}
+
+document.getElementById('auth-password').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitAuth();
+});
+
+function init() {
+  loadSessionList();
+  loadHistory(currentSessionId).then(() => connect());
+}
+
+// ── Sidebar tabs ─────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', (i === 0 && tab === 'sessions') || (i === 1 && tab === 'files'));
+  });
+  const sessPanel = document.getElementById('panel-sessions');
+  const filesPanel = document.getElementById('panel-files');
+  if (tab === 'sessions') {
+    sessPanel.style.display = 'flex';
+    filesPanel.classList.remove('active');
+  } else {
+    sessPanel.style.display = 'none';
+    filesPanel.classList.add('active');
+    loadFiles(currentFilePath || '');
+  }
+}
+
 function toggleSidebar() {
   sidebar.classList.toggle('collapsed');
 }
 
+// ── Session list ──────────────────────────────────────────────────────────
 async function loadSessionList() {
   try {
-    const res = await fetch('/v1/sessions');
+    const res = await apiFetch('/v1/sessions');
+    if (!res.ok) return;
     const data = await res.json();
-    const sessions = data.sessions || [];
+    const sessions = (data.sessions || []).filter(s => s.key && s.key.startsWith('web:'));
     sessionList.innerHTML = '';
 
-    // Filter web sessions only
-    const webSessions = sessions.filter(s => s.key && s.key.startsWith('web:'));
-
-    if (webSessions.length === 0) {
+    if (sessions.length === 0) {
       sessionList.innerHTML = '<div style="padding:14px;color:#666;font-size:0.8rem;">暂无会话</div>';
       return;
     }
 
-    webSessions.forEach(s => {
+    sessions.forEach(s => {
       const sid = s.key.replace('web:', '');
       const el = document.createElement('div');
       el.className = 'session-item' + (sid === currentSessionId ? ' active' : '');
+
       const updatedAt = s.updated_at ? new Date(s.updated_at).toLocaleString('zh-CN') : '';
-      el.innerHTML = `<span class="session-name">${escapeHtml(sid)}</span>
-        <span class="session-time">${updatedAt}</span>`;
-      el.onclick = () => switchSession(sid);
+      el.innerHTML = `
+        <div class="session-item-info" onclick="switchSession('${escapeHtml(sid)}')">
+          <span class="session-name">${escapeHtml(sid)}</span>
+          <span class="session-time">${updatedAt}</span>
+        </div>
+        <button class="session-del-btn" title="删除会话" onclick="deleteSession('${escapeHtml(sid)}', event)">✕</button>`;
       sessionList.appendChild(el);
     });
   } catch (e) {
@@ -335,6 +600,7 @@ function switchSession(sid) {
   currentStepsGroup = null;
   stepsCounter = 0;
   toolsUsed = [];
+  skillsUsed = [];
   loadHistory(sid).then(() => connect());
   updateActiveSession();
 }
@@ -347,15 +613,123 @@ function createAndSwitch() {
 
 function updateActiveSession() {
   document.querySelectorAll('.session-item').forEach(el => {
-    const name = el.querySelector('.session-name').textContent;
-    el.classList.toggle('active', name === currentSessionId);
+    const nameEl = el.querySelector('.session-name');
+    if (nameEl) el.classList.toggle('active', nameEl.textContent === currentSessionId);
   });
 }
 
-// ── Load chat history ────────────────────────────────────────────────────
+async function deleteSession(sid, e) {
+  e.stopPropagation();
+  await apiFetch(`/v1/sessions/web:${encodeURIComponent(sid)}`, { method: 'DELETE' });
+  if (sid === currentSessionId) {
+    // Switch to 'default' or any other remaining session
+    switchSession('default');
+  }
+  loadSessionList();
+}
+
+// ── File browser ──────────────────────────────────────────────────────────
+function formatSize(bytes) {
+  if (bytes === null || bytes === undefined) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function loadFiles(path) {
+  currentFilePath = path;
+  const url = '/v1/files' + (path ? '?path=' + encodeURIComponent(path) : '');
+  try {
+    const res = await apiFetch(url);
+    if (!res.ok) { renderFilesError('无法加载目录'); return; }
+    const data = await res.json();
+    if (data.type === 'file') {
+      showFileModal(data.path || data.name, data.content || '');
+      // Don't change current path since we opened a file
+      return;
+    }
+    renderFilesList(data);
+  } catch (e) {
+    renderFilesError('请求失败');
+  }
+}
+
+function renderBreadcrumb(path) {
+  const bc = document.getElementById('files-breadcrumb');
+  if (!path) {
+    bc.innerHTML = '<span onclick="loadFiles(\'\')">workspace</span>';
+    return;
+  }
+  const parts = path.split('/').filter(Boolean);
+  let html = '<span onclick="loadFiles(\'\')">workspace</span>';
+  let acc = '';
+  parts.forEach((p, i) => {
+    acc += (acc ? '/' : '') + p;
+    const captured = acc;
+    html += ` / <span onclick="loadFiles('${escapeHtml(captured)}')">${escapeHtml(p)}</span>`;
+  });
+  bc.innerHTML = html;
+}
+
+function renderFilesList(data) {
+  renderBreadcrumb(data.path || '');
+  const list = document.getElementById('files-list');
+  list.innerHTML = '';
+
+  // Back button if not at root
+  if (data.path) {
+    const parentPath = data.path.includes('/') ? data.path.substring(0, data.path.lastIndexOf('/')) : '';
+    const back = document.createElement('div');
+    back.className = 'file-item';
+    back.innerHTML = '<span class="file-icon">↩</span><span class="file-name">..</span>';
+    back.onclick = () => loadFiles(parentPath);
+    list.appendChild(back);
+  }
+
+  const entries = data.entries || [];
+  if (entries.length === 0) {
+    list.innerHTML += '<div style="padding:12px;color:#666;font-size:0.78rem;">空目录</div>';
+    return;
+  }
+
+  entries.forEach(entry => {
+    const el = document.createElement('div');
+    el.className = 'file-item';
+    const icon = entry.type === 'dir' ? '📁' : '📄';
+    const size = entry.type === 'file' ? formatSize(entry.size) : '';
+    el.innerHTML = `<span class="file-icon">${icon}</span>
+      <span class="file-name">${escapeHtml(entry.name)}</span>
+      <span class="file-size">${size}</span>`;
+    el.onclick = () => loadFiles(entry.path);
+    list.appendChild(el);
+  });
+}
+
+function renderFilesError(msg) {
+  document.getElementById('files-list').innerHTML =
+    `<div style="padding:12px;color:#e74c3c;font-size:0.78rem;">${escapeHtml(msg)}</div>`;
+}
+
+function showFileModal(title, content) {
+  document.getElementById('file-modal-title').textContent = title;
+  document.getElementById('file-modal-content').textContent = content;
+  document.getElementById('file-modal-overlay').classList.remove('hidden');
+}
+
+function closeFileModal() {
+  document.getElementById('file-modal-overlay').classList.add('hidden');
+}
+
+// Close file modal on overlay click
+document.getElementById('file-modal-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('file-modal-overlay')) closeFileModal();
+});
+
+// ── History loading ────────────────────────────────────────────────────────
 async function loadHistory(sid) {
   try {
-    const res = await fetch(`/v1/sessions/web:${encodeURIComponent(sid)}/messages`);
+    const res = await apiFetch(`/v1/sessions/web:${encodeURIComponent(sid)}/messages`);
+    if (!res.ok) return;
     const data = await res.json();
     const messages = data.messages || [];
     if (messages.length === 0) return;
@@ -366,29 +740,24 @@ async function loadHistory(sid) {
     chat.appendChild(divider);
 
     messages.forEach(m => {
-      if (m.role === 'user') {
-        appendUser(m.content, true);
-      } else if (m.role === 'assistant') {
-        appendBot(m.content, true);
-      }
+      if (m.role === 'user') appendUser(m.content, true);
+      else if (m.role === 'assistant') appendBot(m.content, true);
     });
 
     const endDivider = document.createElement('div');
     endDivider.className = 'history-divider';
     endDivider.textContent = '── 历史记录结束 ──';
     chat.appendChild(endDivider);
-
     scrollBottom();
   } catch (e) {
     console.error('Failed to load history:', e);
   }
 }
 
-// ── WebSocket ────────────────────────────────────────────────────────────
+// ── WebSocket ─────────────────────────────────────────────────────────────
 function connect() {
   const sid = currentSessionId;
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/v1/ws/${sid}`);
+  ws = new WebSocket(wsUrl(sid));
 
   ws.onopen = () => {
     dot.className = 'connected';
@@ -420,7 +789,7 @@ function connect() {
       collapseCurrentSteps();
       appendBot(msg.content);
       setBusy(false);
-      loadSessionList();  // refresh sidebar timestamps
+      loadSessionList();
     } else if (msg.type === 'push') {
       removeTyping();
       collapseCurrentSteps();
@@ -430,17 +799,7 @@ function connect() {
   };
 }
 
-function reconnect() {
-  if (ws) ws.close();
-  chat.innerHTML = '';
-  currentStepsGroup = null;
-  stepsCounter = 0;
-  toolsUsed = [];
-  skillsUsed = [];
-  connect();
-}
-
-// ── Send ─────────────────────────────────────────────────────────────────
+// ── Send ──────────────────────────────────────────────────────────────────
 function sendMessage() {
   const text = input.value.trim();
   if (!text || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -467,7 +826,7 @@ input.addEventListener('input', () => {
 // ── Session clear ─────────────────────────────────────────────────────────
 async function clearSession() {
   const sid = currentSessionId;
-  await fetch(`/v1/sessions/web:${sid}`, { method: 'DELETE' });
+  await apiFetch(`/v1/sessions/web:${encodeURIComponent(sid)}`, { method: 'DELETE' });
   chat.innerHTML = '';
   currentStepsGroup = null;
   stepsCounter = 0;
@@ -479,12 +838,12 @@ async function clearSession() {
 async function triggerHeartbeat() {
   try {
     appendSystem('⚡ 触发心跳中…');
-    const res = await fetch('/v1/heartbeat/trigger', { method: 'POST' });
+    const res = await apiFetch('/v1/heartbeat/trigger', { method: 'POST' });
     const data = await res.json();
     if (data.error) {
       appendSystem(`心跳触发失败：${data.error}`);
     } else {
-      appendSystem(`心跳已触发，结果将以推送形式送达（若有任务）`);
+      appendSystem('心跳已触发，结果将以推送形式送达（若有任务）');
     }
   } catch (e) {
     appendSystem('心跳请求失败，请检查服务是否运行');
@@ -542,7 +901,7 @@ function appendSystem(text) {
   scrollBottom();
 }
 
-// ── Collapsible steps (progress + tool) ─────────────────────────────────
+// ── Collapsible steps ─────────────────────────────────────────────────────
 function ensureStepsGroup() {
   if (currentStepsGroup) return currentStepsGroup;
 
@@ -568,7 +927,6 @@ function ensureStepsGroup() {
   return group;
 }
 
-// Extract the bare tool name from hint strings like 'web_search("query")'
 function extractToolName(text) {
   const m = text.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*[(\s"']?/);
   return m ? m[1] : text.split(/[\s("]/)[0];
@@ -592,9 +950,7 @@ function updateToggleChips(group) {
 }
 
 function appendSkillUsed(skillName) {
-  if (!skillsUsed.includes(skillName)) {
-    skillsUsed.push(skillName);
-  }
+  if (!skillsUsed.includes(skillName)) skillsUsed.push(skillName);
   const group = ensureStepsGroup();
   updateToggleChips(group);
 }
@@ -611,17 +967,12 @@ function appendStep(text, isTool) {
 
   if (isTool) {
     const toolName = extractToolName(text);
-    if (toolName && !toolsUsed.includes(toolName)) {
-      toolsUsed.push(toolName);
-    }
+    if (toolName && !toolsUsed.includes(toolName)) toolsUsed.push(toolName);
     updateToggleChips(group);
   }
 
-  // Update running summary
   const summary = group.querySelector('.step-summary');
   summary.textContent = `⏳ 思考中… (${stepsCounter} 步)`;
-
-  // Expand content height
   content.style.maxHeight = content.scrollHeight + 40 + 'px';
   scrollBottom();
 }
@@ -638,14 +989,12 @@ function finalizeCurrentSteps() {
   const toolLabel = parts.length ? `使用了 ${parts.join(' · ')}` : '纯推理';
   summary.textContent = `✅ 完成 · ${stepsCounter} 步 · ${toolLabel}`;
 
-  // Keep expanded so user can see — they can manually collapse
   currentStepsGroup = null;
   stepsCounter = 0;
   toolsUsed = [];
   skillsUsed = [];
 }
 
-// Legacy alias so message/push handlers can call it
 function collapseCurrentSteps() {
   finalizeCurrentSteps();
 }
@@ -657,18 +1006,18 @@ function showTyping() {
   chat.appendChild(typingEl);
   scrollBottom();
 }
+
 function removeTyping() {
   if (typingEl) { typingEl.remove(); typingEl = null; }
 }
 
 function escapeHtml(t) {
-  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;')
           .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Boot ──────────────────────────────────────────────────────────────────
-loadSessionList();
-loadHistory(currentSessionId).then(() => connect());
+// ── Start ─────────────────────────────────────────────────────────────────
+boot();
 </script>
 </body>
 </html>
