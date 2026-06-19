@@ -284,8 +284,13 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": True,
-            "stream_options": {"include_usage": True},
         }
+        # stream_options is OpenAI-only; many internal/compatible gateways reject it.
+        # Only send it when we know the endpoint is the real OpenAI API or explicitly
+        # supports it — i.e., when no custom api_base is configured.
+        if not self.api_base:
+            kwargs["stream_options"] = {"include_usage": True}
+
         self._apply_model_overrides(model, kwargs)
         if self.api_key:
             kwargs["api_key"] = self.api_key
@@ -308,13 +313,24 @@ class LiteLLMProvider(LLMProvider):
 
         try:
             stream = await acompletion(**kwargs)
+            # Some gateways return a complete response even when stream=True.
+            # Detect that and fall back to the non-streaming path transparently.
+            if not hasattr(stream, "__aiter__"):
+                yield ("final", self._parse_response(stream))
+                return
             async for chunk in stream:
                 choices = getattr(chunk, "choices", None) or []
                 if choices:
                     choice = choices[0]
                     delta = getattr(choice, "delta", None)
                     if delta is not None:
+                        # Some gateways put text in delta.content (standard),
+                        # delta.text (non-standard), or even as a raw string.
                         text = getattr(delta, "content", None)
+                        if text is None:
+                            text = getattr(delta, "text", None)
+                        if isinstance(delta, str):
+                            text = delta
                         if text:
                             content_parts.append(text)
                             yield ("delta", text)
