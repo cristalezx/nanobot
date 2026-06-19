@@ -132,6 +132,19 @@ def create_app(
             return FileResponse(html)
         return JSONResponse({"error": "UI not found"}, status_code=404)
 
+    @app.get("/vendor/{filename}")
+    async def serve_vendor(filename: str):
+        """Serve locally vendored frontend libraries (no token required)."""
+        vendor_dir = (ui_path / "vendor").resolve()
+        target = (vendor_dir / filename).resolve()
+        try:
+            target.relative_to(vendor_dir)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        if target.is_file():
+            return FileResponse(target)
+        raise HTTPException(status_code=404, detail="Not found")
+
     # ------------------------------------------------------------------ Auth
     @app.post("/v1/auth")
     async def authenticate(request: Request):

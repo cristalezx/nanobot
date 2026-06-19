@@ -3,18 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>nanobot</title>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/core.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/python.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/javascript.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/typescript.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/bash.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/json.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/markdown.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/css.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/xml.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css">
+<title>perrobot 🐕</title>
+<!-- Locally vendored libraries (no external CDN — works offline / behind firewall) -->
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/highlight.min.js"></script>
+<script src="/vendor/mammoth.browser.min.js"></script>
+<link rel="stylesheet" href="/vendor/github.min.css">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -89,12 +83,23 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
 
 /* ── Sidebar ── */
 #sidebar {
-  width: 240px; min-width: 240px; background: #1e1e3a; color: #ccc;
+  width: 240px; min-width: 160px; max-width: 480px;
+  background: #1e1e3a; color: #ccc;
   display: flex; flex-direction: column; flex-shrink: 0;
   border-right: 1px solid #2a2a4e; overflow: hidden;
-  transition: margin-left 0.25s ease;
 }
-#sidebar.collapsed { margin-left: -240px; }
+#sidebar.collapsed { display: none; }
+
+/* ── Resizers (drag to resize panels) ── */
+.resizer {
+  width: 5px; flex-shrink: 0; cursor: col-resize; background: transparent;
+  position: relative; z-index: 5; transition: background 0.15s;
+}
+.resizer:hover, .resizer.dragging { background: #5c5cff; }
+#resizer-right { display: none; }
+#sidebar.collapsed + #resizer-left { display: none; }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe { pointer-events: none; }
 
 /* ── Sidebar Tabs ── */
 #sidebar-tabs {
@@ -368,14 +373,11 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
 
 /* ── Editor Panel ── */
 #editor-panel {
-  width: 0; display: flex; flex-direction: column; background: #fff;
+  display: none; flex-direction: column; background: #fff;
   border-left: 1px solid #ddd; overflow: hidden;
-  transition: width 0.25s ease;
-  flex-shrink: 0;
+  width: 520px; min-width: 280px; flex-shrink: 0;
 }
-#editor-panel.open {
-  width: 480px;
-}
+#editor-panel.open { display: flex; }
 #editor-tabs-bar {
   display: flex; align-items: center; background: #f5f5f5;
   border-bottom: 1px solid #ddd; flex-shrink: 0; overflow-x: auto;
@@ -422,13 +424,50 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
   flex: 1; overflow: hidden; display: flex; flex-direction: column;
 }
 #editor-view-area {
-  flex: 1; overflow: auto; padding: 0;
+  flex: 1; overflow: auto; padding: 0; background: #fff;
 }
 #editor-view-area pre {
   margin: 0; padding: 16px;
   font-family: 'Fira Code', 'Courier New', monospace;
   font-size: 0.82rem; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
 }
+/* Rich preview containers */
+.preview-doc {
+  padding: 20px 26px; font-size: 0.9rem; line-height: 1.65; color: #24292f;
+  max-width: 860px; margin: 0 auto;
+}
+.preview-doc h1, .preview-doc h2, .preview-doc h3 { margin: 14px 0 8px; }
+.preview-doc h1 { font-size: 1.5rem; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+.preview-doc h2 { font-size: 1.25rem; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+.preview-doc p { margin: 8px 0; }
+.preview-doc ul, .preview-doc ol { padding-left: 24px; margin: 8px 0; }
+.preview-doc table { border-collapse: collapse; margin: 10px 0; }
+.preview-doc th, .preview-doc td { border: 1px solid #ddd; padding: 5px 10px; }
+.preview-doc img { max-width: 100%; }
+.preview-doc pre { background: #f6f8fa; padding: 12px; border-radius: 6px; overflow-x: auto; }
+.preview-doc code { background: #f0f0f4; padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+.preview-doc pre code { background: none; padding: 0; }
+.preview-doc blockquote { border-left: 3px solid #ddd; padding-left: 12px; color: #666; margin: 8px 0; }
+.preview-frame { width: 100%; height: 100%; border: none; background: #fff; }
+.preview-image-wrap {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: #f0f0f0; overflow: auto;
+}
+.preview-image-wrap img {
+  max-width: 100%; max-height: 100%; box-shadow: 0 2px 12px rgba(0,0,0,.15);
+  background: #fff;
+}
+.preview-fallback {
+  height: 100%; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 14px; color: #888; padding: 30px; text-align: center;
+}
+.preview-fallback .pf-icon { font-size: 3rem; }
+.preview-fallback button {
+  background: #5c5cff; color: #fff; border: none; border-radius: 8px;
+  padding: 9px 20px; cursor: pointer; font-size: 0.85rem;
+}
+.preview-fallback button:hover { background: #4444dd; }
+.preview-loading { padding: 30px; text-align: center; color: #888; font-size: 0.85rem; }
 #editor-edit-area {
   flex: 1; display: none; flex-direction: column;
 }
@@ -447,7 +486,8 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
 /* ── Responsive ── */
 @media (max-width: 760px) {
   #sidebar { position: absolute; top: 0; left: 0; bottom: 0; z-index: 20; }
-  #sidebar.collapsed { margin-left: -240px; }
+  #sidebar.collapsed { display: none; }
+  #resizer-left, #resizer-right { display: none !important; }
   #editor-panel.open { width: 100%; position: absolute; top: 0; right: 0; bottom: 0; z-index: 15; }
 }
 </style>
@@ -457,7 +497,7 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
 <!-- Auth Modal -->
 <div id="auth-overlay" class="hidden">
   <div id="auth-box">
-    <h2>nanobot</h2>
+    <h2>🐕 perrobot</h2>
     <p>请输入访问密码</p>
     <input id="auth-password" type="password" placeholder="密码" autocomplete="current-password">
     <div id="auth-error"></div>
@@ -469,7 +509,7 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
 <header>
   <button id="toggle-sidebar" onclick="toggleSidebar()" title="切换侧边栏">☰</button>
   <div id="status-dot" title="WebSocket 状态"></div>
-  <h1>nanobot</h1>
+  <h1>🐕 perrobot</h1>
   <div class="header-spacer"></div>
   <input id="session-input" type="text" value="default" placeholder="新会话 ID" title="输入新会话 ID">
   <button class="btn" onclick="createAndSwitch()">新建会话</button>
@@ -531,6 +571,9 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
     </div>
   </div>
 
+  <!-- Resizer: sidebar | chat -->
+  <div class="resizer" id="resizer-left"></div>
+
   <!-- Chat Panel -->
   <div id="chat-panel">
     <div id="chat"></div>
@@ -539,6 +582,9 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
       <button id="send-btn" onclick="sendMessage()">发送</button>
     </div>
   </div>
+
+  <!-- Resizer: chat | editor -->
+  <div class="resizer" id="resizer-right"></div>
 
   <!-- Editor Panel -->
   <div id="editor-panel">
@@ -553,7 +599,7 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
       <button class="editor-tool-btn" id="editor-save-btn" onclick="saveCurrentFile()">保存</button>
     </div>
     <div id="editor-body">
-      <div id="editor-view-area"><pre><code id="editor-code"></code></pre></div>
+      <div id="editor-view-area"></div>
       <div id="editor-edit-area" style="display:none;">
         <textarea id="editor-textarea" spellcheck="false"></textarea>
       </div>
@@ -567,7 +613,7 @@ header h1 { font-size: 1.1rem; white-space: nowrap; }
 </div>
 
 <script>
-marked.setOptions({ breaks: true, gfm: true });
+if (typeof marked !== 'undefined') marked.setOptions({ breaks: true, gfm: true });
 
 // ── Global state ──────────────────────────────────────────────────────────
 let ws = null;
@@ -603,6 +649,80 @@ const dot         = document.getElementById('status-dot');
 const sessInput   = document.getElementById('session-input');
 const sidebar     = document.getElementById('sidebar');
 const sessionList = document.getElementById('session-list');
+
+// ── Panel resizing (drag handles) ──────────────────────────────────────────
+function setupResizer(handleId, getEl, opts) {
+  var handle = document.getElementById(handleId);
+  if (!handle) return;
+  handle.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    var el = getEl();
+    if (!el) return;
+    var startX = e.clientX;
+    var startW = el.getBoundingClientRect().width;
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing');
+    function onMove(ev) {
+      // dir = +1 means panel grows when dragging right; -1 means grows when dragging left
+      var delta = (ev.clientX - startX) * (opts.dir || 1);
+      var w = Math.max(opts.min, Math.min(opts.max, startW + delta));
+      el.style.width = w + 'px';
+    }
+    function onUp() {
+      handle.classList.remove('dragging');
+      document.body.classList.remove('resizing');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      try { localStorage.setItem(opts.key, el.style.width); } catch (_) {}
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+setupResizer('resizer-left', function() { return sidebar; },
+  { min: 160, max: 480, dir: 1, key: 'perrobot.sidebarW' });
+setupResizer('resizer-right', function() { return document.getElementById('editor-panel'); },
+  { min: 280, max: 1100, dir: -1, key: 'perrobot.editorW' });
+
+// Restore saved widths
+try {
+  var sw = localStorage.getItem('perrobot.sidebarW');
+  if (sw) sidebar.style.width = sw;
+} catch (_) {}
+
+// ── File type detection ─────────────────────────────────────────────────────
+var CODE_LANGS = {
+  py: 'python', js: 'javascript', ts: 'typescript', jsx: 'javascript', tsx: 'typescript',
+  sh: 'bash', bash: 'bash', json: 'json', css: 'css', scss: 'css',
+  xml: 'xml', yaml: 'yaml', yml: 'yaml', java: 'java', go: 'go', rs: 'rust',
+  c: 'c', cpp: 'cpp', h: 'cpp', rb: 'ruby', php: 'php', sql: 'sql', toml: 'ini', ini: 'ini'
+};
+var IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
+
+function fileKind(path) {
+  var ext = (path.split('.').pop() || '').toLowerCase();
+  if (ext === 'md' || ext === 'markdown') return 'md';
+  if (ext === 'html' || ext === 'htm') return 'html';
+  if (ext === 'pdf') return 'pdf';
+  if (ext === 'docx') return 'docx';
+  if (IMAGE_EXTS.indexOf(ext) >= 0) return 'image';
+  if (ext === 'doc' || ext === 'xls' || ext === 'xlsx' || ext === 'ppt' ||
+      ext === 'pptx' || ext === 'zip' || ext === 'tar' || ext === 'gz' ||
+      ext === 'exe' || ext === 'bin' || ext === 'so' || ext === 'dylib') return 'binary';
+  return 'text';
+}
+
+// Editable kinds (can be loaded as text & saved)
+function isEditableKind(kind) {
+  return kind === 'text' || kind === 'md' || kind === 'html';
+}
+
+function downloadUrl(path) {
+  var u = '/v1/files/download?path=' + encodeURIComponent(path);
+  if (authToken) u += '&token=' + encodeURIComponent(authToken);
+  return u;
+}
 
 // ── Auth helpers ───────────────────────────────────────────────────────────
 function apiFetch(url, options) {
@@ -825,12 +945,34 @@ async function loadFiles(path) {
     if (!res.ok) { renderFilesError('无法加载目录'); return; }
     var data = await res.json();
     if (data.type === 'file') {
-      openFileInEditor(data.path || data.name, data.content || '');
+      var p = data.path || path;
+      var nm = data.name || p.split('/').pop();
+      var kind = fileKind(nm);
+      if (isEditableKind(kind)) openFileInEditor(p, data.content || '', kind);
+      else openFileInEditor(p, null, kind);
       return;
     }
     renderFilesList(data, showHidden);
   } catch (e) {
-    renderFilesError('请求失败');
+    renderFilesError('无法加载目录：' + e.message);
+  }
+}
+
+// Open a file (type-aware): fetch text only for editable kinds.
+async function openFile(path, name) {
+  var kind = fileKind(name || path);
+  if (!isEditableKind(kind)) {
+    // Binary / preview-by-URL — no text fetch needed
+    openFileInEditor(path, null, kind);
+    return;
+  }
+  try {
+    var res = await apiFetch('/v1/files?path=' + encodeURIComponent(path));
+    if (!res.ok) { appendSystem('打开文件失败：' + path); return; }
+    var data = await res.json();
+    openFileInEditor(path, (data && data.content) || '', kind);
+  } catch (e) {
+    appendSystem('打开文件失败：' + e.message);
   }
 }
 
@@ -884,7 +1026,12 @@ function renderFilesList(data, showHidden) {
       '<span class="file-name">' + escapeHtml(entry.name) + '</span>' +
       '<span class="file-size">' + size + '</span>';
     var entryPath = entry.path;
-    el.onclick = function() { loadFiles(entryPath); };
+    var entryType = entry.type;
+    var entryName = entry.name;
+    el.onclick = function() {
+      if (entryType === 'dir') loadFiles(entryPath);
+      else openFile(entryPath, entryName);
+    };
     list.appendChild(el);
   });
 }
@@ -955,7 +1102,12 @@ function renderSearchResults(results, mode) {
         '<div class="search-result-name">' + icon + ' ' + escapeHtml(r.name) + '</div>' +
         '<div class="search-result-path">' + escapeHtml(r.path) + '</div>';
       var rPath = r.path;
-      item.onclick = function() { loadFiles(rPath); };
+      var rType = r.type;
+      var rName = r.name;
+      item.onclick = function() {
+        if (rType === 'dir') loadFiles(rPath);
+        else openFile(rPath, rName);
+      };
     } else {
       item.innerHTML =
         '<div class="search-result-path">' + escapeHtml(r.file) + '</div>' +
@@ -970,44 +1122,61 @@ function renderSearchResults(results, mode) {
 }
 
 async function openFileFromSearch(filePath, lineNum) {
-  // Load file content and open in editor
-  try {
-    var url = '/v1/files?path=' + encodeURIComponent(filePath);
-    var res = await apiFetch(url);
-    if (!res.ok) return;
-    var data = await res.json();
-    if (data.type === 'file') {
-      openFileInEditor(filePath, data.content || '');
-      // TODO: scroll to lineNum in view mode
-    }
-  } catch (e) {
-    console.error('Failed to open file:', e);
+  var name = filePath.split('/').pop();
+  await openFile(filePath, name);
+  // Jump to the matched line in edit mode (text files only)
+  var state = editorFiles.get(filePath);
+  if (state && isEditableKind(state.kind)) {
+    setEditorMode('edit');
+    var ta = document.getElementById('editor-textarea');
+    var lines = (state.content || '').split('\n');
+    var pos = 0;
+    for (var i = 0; i < lineNum - 1 && i < lines.length; i++) pos += lines[i].length + 1;
+    ta.focus();
+    ta.setSelectionRange(pos, pos + (lines[lineNum - 1] || '').length);
+    // Scroll roughly to the line
+    var lineHeight = 22;
+    ta.scrollTop = Math.max(0, (lineNum - 3) * lineHeight);
   }
 }
 
 // ── Editor Panel ───────────────────────────────────────────────────────────
 function openEditorPanel() {
-  document.getElementById('editor-panel').classList.add('open');
+  var panel = document.getElementById('editor-panel');
+  panel.classList.add('open');
+  document.getElementById('resizer-right').style.display = 'block';
+  // Restore saved editor width
+  try {
+    var ew = localStorage.getItem('perrobot.editorW');
+    if (ew) panel.style.width = ew;
+  } catch (_) {}
 }
 
 function closeEditorPanel() {
   document.getElementById('editor-panel').classList.remove('open');
+  document.getElementById('resizer-right').style.display = 'none';
 }
 
-function openFileInEditor(path, content) {
+function openFileInEditor(path, content, kind) {
+  kind = kind || fileKind(path);
   if (!editorFiles.has(path)) {
-    editorFiles.set(path, { content: content, originalContent: content, dirty: false });
+    editorFiles.set(path, {
+      content: content, originalContent: content, dirty: false, kind: kind
+    });
   } else {
-    // Update originalContent only if not already dirty
     var existing = editorFiles.get(path);
+    existing.kind = kind;
     if (!existing.dirty) {
       existing.content = content;
       existing.originalContent = content;
     }
   }
   editorActiveTab = path;
+  // Binary / preview-only kinds force view mode
+  if (!isEditableKind(kind)) editorMode = 'view';
   openEditorPanel();
   renderEditorTabs();
+  syncEditorToolbar();
   renderEditorContent();
 }
 
@@ -1035,7 +1204,10 @@ function switchEditorTab(path) {
   // Save current textarea content before switching
   saveCurrentTabContent();
   editorActiveTab = path;
+  var state = editorFiles.get(path);
+  if (state && !isEditableKind(state.kind)) editorMode = 'view';
   renderEditorTabs();
+  syncEditorToolbar();
   renderEditorContent();
 }
 
@@ -1043,11 +1215,21 @@ function saveCurrentTabContent() {
   if (!editorActiveTab) return;
   var state = editorFiles.get(editorActiveTab);
   if (!state) return;
-  if (editorMode === 'edit') {
+  if (editorMode === 'edit' && isEditableKind(state.kind)) {
     var ta = document.getElementById('editor-textarea');
     state.content = ta.value;
     state.dirty = state.content !== state.originalContent;
   }
+}
+
+// Enable/disable toolbar buttons based on the active file's kind.
+function syncEditorToolbar() {
+  var state = editorActiveTab ? editorFiles.get(editorActiveTab) : null;
+  var editable = state && isEditableKind(state.kind);
+  var editBtn = document.getElementById('editor-edit-btn');
+  var saveBtn = document.getElementById('editor-save-btn');
+  editBtn.style.display = editable ? '' : 'none';
+  saveBtn.style.display = editable ? '' : 'none';
 }
 
 function closeEditorTab(path, e) {
@@ -1074,56 +1256,125 @@ function renderEditorContent() {
   var state = editorFiles.get(editorActiveTab);
   if (!state) return;
 
+  var path = editorActiveTab;
+  var kind = state.kind || 'text';
   var content = state.content || '';
 
-  // Update status bar
-  var lines = content.split('\n').length;
-  var bytes = new TextEncoder().encode(content).length;
-  document.getElementById('editor-stat-path').textContent = editorActiveTab;
-  document.getElementById('editor-stat-lines').textContent = lines + ' 行';
-  document.getElementById('editor-stat-bytes').textContent = formatSize(bytes);
-
-  if (editorMode === 'view') {
-    var codeEl = document.getElementById('editor-code');
-    codeEl.textContent = content;
-    var ext = editorActiveTab.split('.').pop().toLowerCase();
-    var langMap = {
-      py: 'python', js: 'javascript', ts: 'typescript', sh: 'bash',
-      bash: 'bash', json: 'json', md: 'markdown', css: 'css',
-      html: 'xml', xml: 'xml', htm: 'xml'
-    };
-    codeEl.className = '';
-    if (langMap[ext]) {
-      codeEl.classList.add('language-' + langMap[ext]);
-    }
-    hljs.highlightElement(codeEl);
+  // Status bar
+  var statPath = document.getElementById('editor-stat-path');
+  var statLines = document.getElementById('editor-stat-lines');
+  var statBytes = document.getElementById('editor-stat-bytes');
+  statPath.textContent = path;
+  if (isEditableKind(kind)) {
+    var bytes = new TextEncoder().encode(content).length;
+    statLines.textContent = content.split('\n').length + ' 行';
+    statBytes.textContent = formatSize(bytes);
   } else {
+    statLines.textContent = kind.toUpperCase();
+    statBytes.textContent = '';
+  }
+
+  var viewArea = document.getElementById('editor-view-area');
+  var editArea = document.getElementById('editor-edit-area');
+
+  // Edit mode: only for editable kinds
+  if (editorMode === 'edit' && isEditableKind(kind)) {
+    viewArea.style.display = 'none';
+    editArea.style.display = 'flex';
     document.getElementById('editor-textarea').value = content;
+    return;
+  }
+
+  // View mode (rich preview)
+  editArea.style.display = 'none';
+  viewArea.style.display = 'block';
+  viewArea.innerHTML = '';
+
+  if (kind === 'image') {
+    viewArea.innerHTML = '<div class="preview-image-wrap"><img src="' +
+      escapeAttr(downloadUrl(path)) + '" alt="' + escapeAttr(path) + '"></div>';
+    return;
+  }
+  if (kind === 'pdf') {
+    viewArea.innerHTML = '<iframe class="preview-frame" src="' +
+      escapeAttr(downloadUrl(path)) + '"></iframe>';
+    return;
+  }
+  if (kind === 'docx') {
+    renderDocxPreview(path, viewArea);
+    return;
+  }
+  if (kind === 'binary') {
+    viewArea.innerHTML =
+      '<div class="preview-fallback"><div class="pf-icon">📦</div>' +
+      '<div>此文件类型暂不支持预览</div>' +
+      '<button onclick="downloadCurrentFile()">↓ 下载到本地</button></div>';
+    return;
+  }
+  if (kind === 'md') {
+    var html = (typeof marked !== 'undefined')
+      ? marked.parse(content) : ('<pre>' + escapeHtml(content) + '</pre>');
+    viewArea.innerHTML = '<div class="preview-doc">' + html + '</div>';
+    return;
+  }
+  if (kind === 'html') {
+    var frame = document.createElement('iframe');
+    frame.className = 'preview-frame';
+    frame.setAttribute('sandbox', 'allow-same-origin');
+    frame.srcdoc = content;
+    viewArea.appendChild(frame);
+    return;
+  }
+
+  // Default: code / plain text with syntax highlight
+  var pre = document.createElement('pre');
+  var code = document.createElement('code');
+  code.textContent = content;
+  var ext = (path.split('.').pop() || '').toLowerCase();
+  if (CODE_LANGS[ext]) code.className = 'language-' + CODE_LANGS[ext];
+  pre.appendChild(code);
+  viewArea.appendChild(pre);
+  // Highlight defensively — never let a highlighter error break the editor
+  if (typeof hljs !== 'undefined') {
+    try { hljs.highlightElement(code); } catch (_) {}
+  }
+}
+
+// Render a .docx file by fetching its bytes and converting with mammoth.
+async function renderDocxPreview(path, viewArea) {
+  viewArea.innerHTML = '<div class="preview-loading">正在解析 Word 文档…</div>';
+  if (typeof mammoth === 'undefined') {
+    viewArea.innerHTML =
+      '<div class="preview-fallback"><div class="pf-icon">📄</div>' +
+      '<div>Word 预览组件未加载</div>' +
+      '<button onclick="downloadCurrentFile()">↓ 下载到本地</button></div>';
+    return;
+  }
+  try {
+    var res = await apiFetch(downloadUrl(path));
+    if (!res.ok) throw new Error('下载失败');
+    var buf = await res.arrayBuffer();
+    var result = await mammoth.convertToHtml({ arrayBuffer: buf });
+    // Guard against stale tab switches
+    if (editorActiveTab !== path) return;
+    viewArea.innerHTML = '<div class="preview-doc">' +
+      (result.value || '<p>(空文档)</p>') + '</div>';
+  } catch (e) {
+    viewArea.innerHTML =
+      '<div class="preview-fallback"><div class="pf-icon">📄</div>' +
+      '<div>无法预览此 Word 文档</div>' +
+      '<button onclick="downloadCurrentFile()">↓ 下载到本地</button></div>';
   }
 }
 
 function setEditorMode(mode) {
   saveCurrentTabContent();
+  // Binary / preview-only files can't be edited
+  var state = editorActiveTab ? editorFiles.get(editorActiveTab) : null;
+  if (mode === 'edit' && state && !isEditableKind(state.kind)) return;
   editorMode = mode;
-  var viewBtn = document.getElementById('editor-view-btn');
-  var editBtn = document.getElementById('editor-edit-btn');
-  var viewArea = document.getElementById('editor-view-area');
-  var editArea = document.getElementById('editor-edit-area');
-
-  viewBtn.classList.toggle('active', mode === 'view');
-  editBtn.classList.toggle('active', mode === 'edit');
-
-  if (mode === 'view') {
-    viewArea.style.display = '';
-    editArea.style.display = 'none';
-  } else {
-    viewArea.style.display = 'none';
-    editArea.style.display = 'flex';
-    editArea.style.flex = '1';
-    // Also fix the textarea container
-    document.getElementById('editor-body').style.display = 'flex';
-    document.getElementById('editor-body').style.flexDirection = 'column';
-  }
+  document.getElementById('editor-view-btn').classList.toggle('active', mode === 'view');
+  document.getElementById('editor-edit-btn').classList.toggle('active', mode === 'edit');
   renderEditorContent();
 }
 
@@ -1332,6 +1583,7 @@ function scrollBottom() {
 }
 
 function renderMarkdown(md) {
+  if (typeof marked === 'undefined') return escapeHtml(md || '');
   return marked.parse(md || '');
 }
 
@@ -1351,7 +1603,7 @@ function appendBot(text, isHistory) {
   el.className = 'msg bot';
   if (isHistory) el.style.opacity = '0.85';
   el.innerHTML =
-    '<div class="avatar">🐈</div>' +
+    '<div class="avatar">🐕</div>' +
     '<div class="bubble">' + renderMarkdown(text) + '</div>';
   chat.appendChild(el);
   if (!isHistory) scrollBottom();
