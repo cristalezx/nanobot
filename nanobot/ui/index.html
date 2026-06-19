@@ -293,6 +293,13 @@ body.resizing iframe { pointer-events: none; }
 .bubble h1,.bubble h2,.bubble h3 { margin: 8px 0 4px; }
 .msg.user .bubble pre { background: #4444cc; }
 .msg.user .bubble code { color: #ffe; }
+/* Live-streaming bubble: show raw text with a blinking caret */
+.bubble.streaming { white-space: pre-wrap; }
+.bubble.streaming::after {
+  content: '▋'; color: #5c5cff; margin-left: 1px;
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+@keyframes caret-blink { to { visibility: hidden; } }
 /* Tables rendered from markdown (GFM) */
 .bubble table { border-collapse: collapse; margin: 8px 0; font-size: 0.85em;
                 display: block; overflow-x: auto; max-width: 100%; }
@@ -648,6 +655,10 @@ let currentStepsGroup = null;
 let stepsCounter = 0;
 let toolsUsed = [];
 let skillsUsed = [];
+
+// Streaming state (live token-by-token bubble)
+let streamBubbleEl = null;   // the live .bubble element
+let streamBuffer = '';       // accumulated raw text
 
 // File browser state
 let currentFilePath = '';
@@ -1510,6 +1521,8 @@ function connect() {
 
   ws.onclose = function() {
     dot.className = '';
+    streamFinalize();  // keep whatever streamed so far; drop the caret
+    setBusy(false);
     appendSystem('连接断开，5 秒后重连…');
     setTimeout(connect, 5000);
   };
@@ -1518,7 +1531,12 @@ function connect() {
 
   ws.onmessage = function(e) {
     var msg = JSON.parse(e.data);
-    if (msg.type === 'progress') {
+    if (msg.type === 'token') {
+      removeTyping();
+      streamToken(msg.content);
+    } else if (msg.type === 'token_cancel') {
+      streamCancel();
+    } else if (msg.type === 'progress') {
       removeTyping();
       appendStep(msg.content, false);
     } else if (msg.type === 'tool') {
@@ -1530,12 +1548,14 @@ function connect() {
     } else if (msg.type === 'message') {
       removeTyping();
       collapseCurrentSteps();
-      appendBot(msg.content);
+      // If we streamed this answer live, finalize that bubble; else append fresh.
+      if (!streamFinalize(msg.content)) appendBot(msg.content);
       setBusy(false);
       loadSessionList();
     } else if (msg.type === 'push') {
       removeTyping();
       collapseCurrentSteps();
+      streamCancel();  // discard any dangling live partial
       appendPush(msg.content);
       setBusy(false);
     }
@@ -1554,6 +1574,8 @@ function sendMessage() {
   stepsCounter = 0;
   toolsUsed = [];
   skillsUsed = [];
+  streamBubbleEl = null;
+  streamBuffer = '';
   showTyping();
   setBusy(true);
 }
@@ -1673,6 +1695,43 @@ function appendPush(text) {
   chat.appendChild(el);
   enhanceBubble(el.querySelector('.bubble'));
   scrollBottom();
+}
+
+// ── Streaming bubble ───────────────────────────────────────────────────────
+function streamToken(delta) {
+  if (!streamBubbleEl) {
+    var el = document.createElement('div');
+    el.className = 'msg bot';
+    el.innerHTML = '<div class="avatar">🐕</div><div class="bubble streaming"></div>';
+    chat.appendChild(el);
+    streamBubbleEl = el.querySelector('.bubble');
+    streamBuffer = '';
+  }
+  streamBuffer += delta;
+  streamBubbleEl.textContent = streamBuffer;  // plain while streaming (no partial-markdown flicker)
+  scrollBottom();
+}
+
+// Turn turned out to be a tool-call preamble — discard the live partial.
+function streamCancel() {
+  if (streamBubbleEl) {
+    var msgEl = streamBubbleEl.closest('.msg');
+    if (msgEl) msgEl.remove();
+  }
+  streamBubbleEl = null;
+  streamBuffer = '';
+}
+
+// Finalize the live bubble with canonical markdown. Returns true if one existed.
+function streamFinalize(finalText) {
+  if (!streamBubbleEl) return false;
+  streamBubbleEl.classList.remove('streaming');
+  streamBubbleEl.innerHTML = renderMarkdown(finalText != null ? finalText : streamBuffer);
+  enhanceBubble(streamBubbleEl);
+  streamBubbleEl = null;
+  streamBuffer = '';
+  scrollBottom();
+  return true;
 }
 
 function appendSystem(text) {

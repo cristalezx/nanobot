@@ -463,6 +463,12 @@ def create_app(
                         msg_type = "progress"
                     await ws.send_json({"type": msg_type, "content": text})
 
+                async def on_token(kind: str, text: str) -> None:
+                    if kind == "delta":
+                        await ws.send_json({"type": "token", "content": text})
+                    elif kind == "cancel":
+                        await ws.send_json({"type": "token_cancel"})
+
                 msg = InboundMessage(
                     channel=channel,
                     sender_id="web_user",
@@ -470,7 +476,7 @@ def create_app(
                     content=content,
                 )
                 response = await agent._process_message(
-                    msg, session_key=key, on_progress=on_progress
+                    msg, session_key=key, on_progress=on_progress, on_token=on_token
                 )
                 if response is not None:
                     await ws.send_json({

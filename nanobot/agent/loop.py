@@ -181,6 +181,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_token: Callable[..., Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -188,17 +189,46 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
 
+        # Token streaming is disabled when extended thinking is active: streamed
+        # turns can't reconstruct Anthropic thinking_blocks, which the API
+        # requires alongside tool calls. Fall back to buffered chat() then.
+        use_stream = on_token is not None and not self.reasoning_effort
+
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                reasoning_effort=self.reasoning_effort,
-            )
+            if use_stream:
+                response = None
+                streamed_any = False
+                async for ev, payload in self.provider.chat_stream(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    reasoning_effort=self.reasoning_effort,
+                ):
+                    if ev == "delta":
+                        streamed_any = True
+                        await on_token("delta", payload)
+                    elif ev == "final":
+                        response = payload
+                if response is None:
+                    from nanobot.providers.base import LLMResponse
+                    response = LLMResponse(content=None)
+                # If the streamed text turned out to be a tool-call preamble,
+                # tell the client to discard the live partial bubble.
+                if streamed_any and response.has_tool_calls:
+                    await on_token("cancel", "")
+            else:
+                response = await self.provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    reasoning_effort=self.reasoning_effort,
+                )
 
             if response.has_tool_calls:
                 if on_progress:
@@ -346,6 +376,7 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_token: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -449,6 +480,7 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            on_token=on_token,
         )
 
         if final_content is None:

@@ -112,6 +112,28 @@ class LLMProvider(ABC):
         """
         pass
 
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+    ):
+        """Streaming variant. Default: no real streaming — yield a single final.
+
+        Async generator yielding ("delta", str) chunks and a terminal
+        ("final", LLMResponse). Providers that support token streaming should
+        override this; otherwise callers transparently get one final event.
+        """
+        response = await self.chat(
+            messages=messages, tools=tools, model=model,
+            max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
+        yield ("final", response)
+
     @abstractmethod
     def get_default_model(self) -> str:
         """Get the default model for this provider."""

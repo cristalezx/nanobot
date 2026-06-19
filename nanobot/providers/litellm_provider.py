@@ -252,6 +252,118 @@ class LiteLLMProvider(LLMProvider):
                 finish_reason="error",
             )
 
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+    ):
+        """Stream a chat completion via LiteLLM.
+
+        Async generator yielding events:
+            ("delta", str)          -> a chunk of assistant text
+            ("final", LLMResponse)  -> the fully assembled response (always last)
+
+        Falls back to a single ("final", ...) on error, mirroring chat().
+        """
+        original_model = model or self.default_model
+        model = self._resolve_model(original_model)
+        extra_msg_keys = self._extra_msg_keys(original_model, model)
+
+        if self._supports_cache_control(original_model):
+            messages, tools = self._apply_cache_control(messages, tools)
+
+        max_tokens = max(1, max_tokens)
+
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": self._sanitize_messages(self._sanitize_empty_content(messages), extra_keys=extra_msg_keys),
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        self._apply_model_overrides(model, kwargs)
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+            kwargs["drop_params"] = True
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_acc: dict[int, dict[str, Any]] = {}
+        finish_reason = "stop"
+        usage: dict[str, int] = {}
+
+        try:
+            stream = await acompletion(**kwargs)
+            async for chunk in stream:
+                choices = getattr(chunk, "choices", None) or []
+                if choices:
+                    choice = choices[0]
+                    delta = getattr(choice, "delta", None)
+                    if delta is not None:
+                        text = getattr(delta, "content", None)
+                        if text:
+                            content_parts.append(text)
+                            yield ("delta", text)
+                        rc = getattr(delta, "reasoning_content", None)
+                        if rc:
+                            reasoning_parts.append(rc)
+                        for tcd in (getattr(delta, "tool_calls", None) or []):
+                            idx = getattr(tcd, "index", 0) or 0
+                            slot = tool_acc.setdefault(idx, {"id": None, "name": "", "args": ""})
+                            if getattr(tcd, "id", None):
+                                slot["id"] = tcd.id
+                            fn = getattr(tcd, "function", None)
+                            if fn is not None:
+                                if getattr(fn, "name", None):
+                                    slot["name"] = fn.name
+                                if getattr(fn, "arguments", None):
+                                    slot["args"] += fn.arguments
+                    if getattr(choice, "finish_reason", None):
+                        finish_reason = choice.finish_reason
+                cu = getattr(chunk, "usage", None)
+                if cu:
+                    usage = {
+                        "prompt_tokens": getattr(cu, "prompt_tokens", 0) or 0,
+                        "completion_tokens": getattr(cu, "completion_tokens", 0) or 0,
+                        "total_tokens": getattr(cu, "total_tokens", 0) or 0,
+                    }
+        except Exception as e:
+            yield ("final", LLMResponse(content=f"Error calling LLM: {str(e)}", finish_reason="error"))
+            return
+
+        tool_calls = []
+        for idx in sorted(tool_acc):
+            slot = tool_acc[idx]
+            if not slot["name"]:
+                continue
+            args = slot["args"]
+            args = json_repair.loads(args) if isinstance(args, str) and args.strip() else {}
+            tool_calls.append(ToolCallRequest(id=_short_tool_id(), name=slot["name"], arguments=args))
+            finish_reason = "tool_calls"
+
+        yield ("final", LLMResponse(
+            content="".join(content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=usage,
+            reasoning_content="".join(reasoning_parts) or None,
+            thinking_blocks=None,
+        ))
+
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]
