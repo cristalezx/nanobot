@@ -444,6 +444,7 @@ def serve(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     password: str | None = typer.Option(None, "--password", help="Optional UI password"),
+    allow_host_paths: bool = typer.Option(False, "--allow-host-paths", help="Allow browsing/editing any path on the host"),
 ):
     """Start the nanobot web API server with chat UI."""
     try:
@@ -547,7 +548,7 @@ def serve(
     )
 
     ui_path = Path(__file__).parent.parent / "ui"
-    fast_app = create_app(agent, bus, ui_path, heartbeat=heartbeat, password=password)
+    fast_app = create_app(agent, bus, ui_path, heartbeat=heartbeat, password=password, allow_host_paths=allow_host_paths)
 
     async def run():
         try:

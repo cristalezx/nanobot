@@ -3,357 +3,453 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🐈 nanobot</title>
+<title>nanobot</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/python.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/javascript.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/typescript.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/bash.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/json.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/markdown.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/css.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/xml.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-         background: #f5f5f5; height: 100vh; display: flex; flex-direction: column; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f5f5f5; height: 100vh; display: flex; flex-direction: column;
+  overflow: hidden;
+}
 
-  /* ── Auth Modal ── */
-  #auth-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,.6);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 1000;
-  }
-  #auth-overlay.hidden { display: none; }
-  #auth-box {
-    background: #fff; border-radius: 14px; padding: 32px 36px;
-    width: 320px; box-shadow: 0 8px 40px rgba(0,0,0,.3);
-    display: flex; flex-direction: column; gap: 16px;
-  }
-  #auth-box h2 { font-size: 1.2rem; color: #1a1a2e; text-align: center; }
-  #auth-box p { font-size: 0.85rem; color: #666; text-align: center; }
-  #auth-password {
-    border: 1px solid #ddd; border-radius: 8px; padding: 10px 14px;
-    font-size: 0.95rem; outline: none; width: 100%;
-  }
-  #auth-password:focus { border-color: #5c5cff; }
-  #auth-submit {
-    background: #5c5cff; color: #fff; border: none; border-radius: 8px;
-    padding: 10px; font-size: 0.95rem; cursor: pointer; width: 100%;
-  }
-  #auth-submit:hover { background: #4444dd; }
-  #auth-error { color: #c0392b; font-size: 0.82rem; text-align: center; min-height: 18px; }
+/* ── Auth Modal ── */
+#auth-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+#auth-overlay.hidden { display: none; }
+#auth-box {
+  background: #fff; border-radius: 14px; padding: 32px 36px;
+  width: 320px; box-shadow: 0 8px 40px rgba(0,0,0,.3);
+  display: flex; flex-direction: column; gap: 16px;
+}
+#auth-box h2 { font-size: 1.2rem; color: #1a1a2e; text-align: center; }
+#auth-box p { font-size: 0.85rem; color: #666; text-align: center; }
+#auth-password {
+  border: 1px solid #ddd; border-radius: 8px; padding: 10px 14px;
+  font-size: 0.95rem; outline: none; width: 100%;
+}
+#auth-password:focus { border-color: #5c5cff; }
+#auth-submit {
+  background: #5c5cff; color: #fff; border: none; border-radius: 8px;
+  padding: 10px; font-size: 0.95rem; cursor: pointer; width: 100%;
+}
+#auth-submit:hover { background: #4444dd; }
+#auth-error { color: #c0392b; font-size: 0.82rem; text-align: center; min-height: 18px; }
 
-  /* ── File Content Modal ── */
-  #file-modal-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,.5);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 900;
-  }
-  #file-modal-overlay.hidden { display: none; }
-  #file-modal {
-    background: #fff; border-radius: 12px; width: 80vw; max-width: 860px;
-    max-height: 80vh; display: flex; flex-direction: column;
-    box-shadow: 0 8px 40px rgba(0,0,0,.25);
-  }
-  #file-modal-header {
-    padding: 12px 16px; border-bottom: 1px solid #eee;
-    display: flex; align-items: center; justify-content: space-between;
-    flex-shrink: 0;
-  }
-  #file-modal-title { font-size: 0.9rem; font-weight: 600; color: #333;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #file-modal-close {
-    background: none; border: none; font-size: 1.3rem; cursor: pointer;
-    color: #888; padding: 0 4px;
-  }
-  #file-modal-close:hover { color: #333; }
-  #file-modal-body {
-    flex: 1; overflow: auto; padding: 16px;
-  }
-  #file-modal-body pre {
-    font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.82rem;
-    white-space: pre-wrap; word-break: break-all; line-height: 1.5;
-    color: #333;
-  }
+/* ── Header ── */
+header {
+  background: #1a1a2e; color: #fff; padding: 10px 16px;
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0,0,0,.3); z-index: 10;
+}
+header h1 { font-size: 1.1rem; white-space: nowrap; }
+.header-spacer { flex: 1; }
+#session-input {
+  background: #2a2a4e; border: 1px solid #4a4a8e; color: #ccc;
+  border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; width: 140px;
+}
+#session-input:focus { outline: none; border-color: #7c7cff; }
+.btn {
+  background: #5c5cff; color: #fff; border: none; border-radius: 6px;
+  padding: 5px 12px; cursor: pointer; font-size: 0.8rem; white-space: nowrap;
+}
+.btn:hover { background: #4444dd; }
+.btn.danger { background: #c0392b; }
+.btn.danger:hover { background: #a93226; }
+.btn.secondary { background: #3a3a6e; }
+.btn.secondary:hover { background: #4a4a8e; }
+#status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #e74c3c; flex-shrink: 0;
+}
+#status-dot.connected { background: #27ae60; }
+#toggle-sidebar {
+  background: none; border: none; color: #aaa; cursor: pointer;
+  font-size: 1.1rem; padding: 0 6px; display: flex; align-items: center;
+}
+#toggle-sidebar:hover { color: #fff; }
 
-  /* ── Header ── */
-  header {
-    background: #1a1a2e; color: #fff; padding: 10px 16px;
-    display: flex; align-items: center; gap: 10px; flex-shrink: 0;
-    box-shadow: 0 2px 6px rgba(0,0,0,.3); z-index: 10;
-  }
-  header h1 { font-size: 1.1rem; white-space: nowrap; }
-  .header-spacer { flex: 1; }
-  #session-input {
-    background: #2a2a4e; border: 1px solid #4a4a8e; color: #ccc;
-    border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; width: 140px;
-  }
-  #session-input:focus { outline: none; border-color: #7c7cff; }
-  .btn {
-    background: #5c5cff; color: #fff; border: none; border-radius: 6px;
-    padding: 5px 12px; cursor: pointer; font-size: 0.8rem; white-space: nowrap;
-  }
-  .btn:hover { background: #4444dd; }
-  .btn.danger { background: #c0392b; }
-  .btn.danger:hover { background: #a93226; }
-  #status-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #e74c3c; flex-shrink: 0;
-  }
-  #status-dot.connected { background: #27ae60; }
+/* ── Main layout ── */
+#main {
+  flex: 1; display: flex; overflow: hidden;
+}
 
-  /* ── Main layout: sidebar + chat ── */
-  #main {
-    flex: 1; display: flex; overflow: hidden;
-  }
+/* ── Sidebar ── */
+#sidebar {
+  width: 240px; min-width: 240px; background: #1e1e3a; color: #ccc;
+  display: flex; flex-direction: column; flex-shrink: 0;
+  border-right: 1px solid #2a2a4e; overflow: hidden;
+  transition: margin-left 0.25s ease;
+}
+#sidebar.collapsed { margin-left: -240px; }
 
-  /* ── Sidebar ── */
-  #sidebar {
-    width: 240px; min-width: 240px; background: #1e1e3a; color: #ccc;
-    display: flex; flex-direction: column; flex-shrink: 0;
-    border-right: 1px solid #2a2a4e; overflow: hidden;
-    transition: margin-left 0.25s ease;
-  }
-  #sidebar.collapsed {
-    margin-left: -240px;
-  }
+/* ── Sidebar Tabs ── */
+#sidebar-tabs {
+  display: flex; border-bottom: 1px solid #2a2a4e; flex-shrink: 0;
+}
+.tab-btn {
+  flex: 1; background: none; border: none; color: #888;
+  padding: 10px 0; font-size: 0.78rem; cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { color: #ccc; }
+.tab-btn.active { color: #5c5cff; border-bottom-color: #5c5cff; }
 
-  /* ── Sidebar Tabs ── */
-  #sidebar-tabs {
-    display: flex; border-bottom: 1px solid #2a2a4e; flex-shrink: 0;
-  }
-  .tab-btn {
-    flex: 1; background: none; border: none; color: #888;
-    padding: 10px 0; font-size: 0.82rem; cursor: pointer;
-    border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s;
-  }
-  .tab-btn:hover { color: #ccc; }
-  .tab-btn.active { color: #5c5cff; border-bottom-color: #5c5cff; }
+/* ── Sidebar Panels (shared) ── */
+.sidebar-panel {
+  flex: 1; display: none; flex-direction: column; overflow: hidden;
+}
+.sidebar-panel.active { display: flex; }
 
-  /* ── Sessions Panel ── */
-  #panel-sessions {
-    flex: 1; display: flex; flex-direction: column; overflow: hidden;
-  }
-  #sidebar-header {
-    padding: 10px 14px; font-size: 0.85rem; font-weight: 600;
-    color: #aaa; border-bottom: 1px solid #2a2a4e;
-    display: flex; align-items: center; justify-content: space-between;
-    flex-shrink: 0;
-  }
-  #sidebar-header button {
-    background: none; border: none; color: #888; cursor: pointer;
-    font-size: 1rem; padding: 2px 6px; border-radius: 4px;
-  }
-  #sidebar-header button:hover { background: #2a2a4e; color: #fff; }
-  #session-list {
-    flex: 1; overflow-y: auto; padding: 6px 0;
-  }
-  .session-item {
-    padding: 8px 14px; cursor: pointer; font-size: 0.82rem;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    display: flex; align-items: center; gap: 6px;
-    transition: background 0.15s;
-  }
-  .session-item:hover { background: #2a2a4e; }
-  .session-item.active { background: #3a3a6e; border-left: 3px solid #5c5cff; }
-  .session-item-info {
-    flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
-  }
-  .session-item .session-name {
-    font-weight: 500; color: #e0e0e0; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis;
-  }
-  .session-item .session-time {
-    font-size: 0.72rem; color: #777;
-  }
-  .session-del-btn {
-    background: none; border: none; color: #666; cursor: pointer;
-    font-size: 0.85rem; padding: 2px 5px; border-radius: 4px;
-    flex-shrink: 0; line-height: 1; opacity: 0;
-    transition: opacity 0.15s, color 0.15s;
-  }
-  .session-item:hover .session-del-btn { opacity: 1; }
-  .session-del-btn:hover { color: #e74c3c; background: rgba(231,76,60,.15); }
+/* ── Sessions Panel ── */
+#sidebar-sessions-header {
+  padding: 8px 14px; font-size: 0.82rem; font-weight: 600;
+  color: #aaa; border-bottom: 1px solid #2a2a4e;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0; gap: 6px;
+}
+#sidebar-sessions-header button {
+  background: none; border: none; color: #888; cursor: pointer;
+  font-size: 1rem; padding: 2px 6px; border-radius: 4px;
+}
+#sidebar-sessions-header button:hover { background: #2a2a4e; color: #fff; }
+#session-filter {
+  flex: 1; background: #2a2a4e; border: 1px solid #3a3a6e; color: #ccc;
+  border-radius: 4px; padding: 3px 7px; font-size: 0.75rem; outline: none;
+}
+#session-filter:focus { border-color: #5c5cff; }
+#session-list {
+  flex: 1; overflow-y: auto; padding: 4px 0;
+}
+.session-item {
+  padding: 7px 14px; cursor: pointer; font-size: 0.82rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  display: flex; align-items: center; gap: 6px;
+  transition: background 0.15s;
+}
+.session-item:hover { background: #2a2a4e; }
+.session-item.active { background: #3a3a6e; border-left: 3px solid #5c5cff; }
+.session-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.session-item .session-name {
+  font-weight: 500; color: #e0e0e0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.session-item .session-time { font-size: 0.72rem; color: #777; }
+.session-item-actions { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; transition: opacity 0.15s; }
+.session-item:hover .session-item-actions { opacity: 1; }
+.session-action-btn {
+  background: none; border: none; color: #666; cursor: pointer;
+  font-size: 0.75rem; padding: 2px 4px; border-radius: 3px; line-height: 1;
+}
+.session-action-btn:hover { color: #e74c3c; background: rgba(231,76,60,.15); }
+.session-action-btn.export:hover { color: #27ae60; background: rgba(39,174,96,.15); }
 
-  /* ── Files Panel ── */
-  #panel-files {
-    flex: 1; display: none; flex-direction: column; overflow: hidden;
-  }
-  #panel-files.active { display: flex; }
-  #files-breadcrumb {
-    padding: 8px 12px; font-size: 0.78rem; color: #aaa;
-    border-bottom: 1px solid #2a2a4e; flex-shrink: 0;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  #files-breadcrumb span {
-    cursor: pointer; color: #7c7cff;
-  }
-  #files-breadcrumb span:hover { text-decoration: underline; }
-  #files-list {
-    flex: 1; overflow-y: auto; padding: 4px 0;
-  }
-  .file-item {
-    padding: 7px 12px; cursor: pointer; font-size: 0.8rem;
-    display: flex; align-items: center; gap: 8px; color: #ccc;
-    border-bottom: 1px solid rgba(255,255,255,0.03);
-    transition: background 0.15s;
-  }
-  .file-item:hover { background: #2a2a4e; }
-  .file-item .file-icon { flex-shrink: 0; font-size: 0.9rem; }
-  .file-item .file-name {
-    flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .file-item .file-size { font-size: 0.7rem; color: #666; flex-shrink: 0; }
+/* ── Files Panel ── */
+#files-toolbar {
+  padding: 6px 10px; border-bottom: 1px solid #2a2a4e; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 5px;
+}
+#files-path-bar {
+  display: flex; align-items: center; gap: 5px;
+}
+#files-path-input {
+  flex: 1; background: #2a2a4e; border: 1px solid #3a3a6e; color: #ccc;
+  border-radius: 4px; padding: 3px 7px; font-size: 0.75rem; outline: none;
+  font-family: monospace;
+}
+#files-path-input:focus { border-color: #5c5cff; }
+.files-toolbar-row {
+  display: flex; align-items: center; gap: 6px; font-size: 0.73rem; color: #888;
+}
+#files-hidden-toggle { cursor: pointer; accent-color: #5c5cff; }
+#files-new-btn {
+  background: none; border: 1px solid #3a3a6e; color: #888; border-radius: 4px;
+  padding: 2px 7px; font-size: 0.72rem; cursor: pointer; margin-left: auto;
+}
+#files-new-btn:hover { border-color: #5c5cff; color: #5c5cff; }
+#files-workspace-btn {
+  background: none; border: 1px solid #3a3a6e; color: #888; border-radius: 4px;
+  padding: 2px 7px; font-size: 0.72rem; cursor: pointer;
+}
+#files-workspace-btn:hover { border-color: #5c5cff; color: #5c5cff; }
+#files-breadcrumb {
+  padding: 5px 10px; font-size: 0.73rem; color: #aaa;
+  border-bottom: 1px solid #2a2a4e; flex-shrink: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#files-breadcrumb span { cursor: pointer; color: #7c7cff; }
+#files-breadcrumb span:hover { text-decoration: underline; }
+#files-list { flex: 1; overflow-y: auto; padding: 2px 0; }
+.file-item {
+  padding: 6px 10px; cursor: pointer; font-size: 0.79rem;
+  display: flex; align-items: center; gap: 7px; color: #ccc;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  transition: background 0.15s;
+}
+.file-item:hover { background: #2a2a4e; }
+.file-item .file-icon { flex-shrink: 0; font-size: 0.85rem; }
+.file-item .file-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-item .file-size { font-size: 0.68rem; color: #666; flex-shrink: 0; }
 
-  /* ── Sidebar toggle ── */
-  #toggle-sidebar {
-    background: none; border: none; color: #aaa; cursor: pointer;
-    font-size: 1.1rem; padding: 0 6px; display: flex; align-items: center;
-  }
-  #toggle-sidebar:hover { color: #fff; }
+/* ── Search Panel ── */
+#search-toolbar {
+  padding: 8px 10px; border-bottom: 1px solid #2a2a4e; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+#search-mode-toggle {
+  display: flex; gap: 4px;
+}
+.search-mode-btn {
+  flex: 1; background: #2a2a4e; border: 1px solid #3a3a6e; color: #888;
+  border-radius: 4px; padding: 3px 0; font-size: 0.73rem; cursor: pointer;
+}
+.search-mode-btn.active { background: #3a3a6e; border-color: #5c5cff; color: #5c5cff; }
+#search-input-row { display: flex; gap: 4px; }
+#search-q {
+  flex: 1; background: #2a2a4e; border: 1px solid #3a3a6e; color: #ccc;
+  border-radius: 4px; padding: 4px 8px; font-size: 0.78rem; outline: none;
+}
+#search-q:focus { border-color: #5c5cff; }
+#search-btn {
+  background: #5c5cff; color: #fff; border: none; border-radius: 4px;
+  padding: 4px 10px; font-size: 0.75rem; cursor: pointer;
+}
+#search-btn:hover { background: #4444dd; }
+#search-results { flex: 1; overflow-y: auto; padding: 4px 0; }
+.search-result-item {
+  padding: 6px 10px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.15s;
+}
+.search-result-item:hover { background: #2a2a4e; }
+.search-result-name { font-size: 0.79rem; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-result-path { font-size: 0.69rem; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-result-line { font-size: 0.69rem; color: #5c9aff; }
+.search-result-preview { font-size: 0.73rem; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace; }
 
-  /* ── Chat area ── */
-  #chat-wrapper {
-    flex: 1; display: flex; flex-direction: column; overflow: hidden;
-  }
-  #chat {
-    flex: 1; overflow-y: auto; padding: 16px;
-    display: flex; flex-direction: column; gap: 12px;
-  }
+/* ── Chat Panel ── */
+#chat-panel {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  min-width: 0;
+}
+#chat {
+  flex: 1; overflow-y: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
 
-  /* ── Message bubbles ── */
-  .msg { display: flex; gap: 8px; max-width: 88%; }
-  .msg.user { flex-direction: row-reverse; align-self: flex-end; }
-  .msg.bot  { align-self: flex-start; }
-  .msg.push { align-self: center; max-width: 96%; }
+/* ── Message bubbles ── */
+.msg { display: flex; gap: 8px; max-width: 88%; }
+.msg.user { flex-direction: row-reverse; align-self: flex-end; }
+.msg.bot  { align-self: flex-start; }
+.msg.push { align-self: center; max-width: 96%; }
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; background: #ddd;
+}
+.msg.user .avatar { background: #5c5cff; }
+.msg.bot  .avatar { background: #e8e8e8; }
+.msg.push .avatar { background: #f39c12; }
+.bubble {
+  padding: 10px 14px; border-radius: 14px; line-height: 1.5;
+  font-size: 0.9rem; word-break: break-word;
+}
+.msg.user .bubble {
+  background: #5c5cff; color: #fff; border-bottom-right-radius: 4px;
+}
+.msg.bot .bubble {
+  background: #fff; color: #222; border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+.msg.push .bubble {
+  background: #fff3cd; color: #856404; border-radius: 10px;
+  border: 1px solid #ffc107; font-size: 0.85rem; width: 100%;
+}
+.bubble pre { background: #f6f8fa; border-radius: 6px; padding: 10px;
+              overflow-x: auto; margin: 6px 0; }
+.bubble code { font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.85em; }
+.bubble p { margin-bottom: 6px; }
+.bubble p:last-child { margin-bottom: 0; }
+.bubble ul, .bubble ol { padding-left: 18px; margin-bottom: 6px; }
+.bubble h1,.bubble h2,.bubble h3 { margin: 8px 0 4px; }
+.msg.user .bubble pre { background: #4444cc; }
+.msg.user .bubble code { color: #ffe; }
 
-  .avatar {
-    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1rem; background: #ddd;
-  }
-  .msg.user .avatar { background: #5c5cff; }
-  .msg.bot  .avatar { background: #e8e8e8; }
-  .msg.push .avatar { background: #f39c12; }
+/* ── Steps ── */
+.steps-group { align-self: flex-start; max-width: 92%; margin: 2px 0; }
+.steps-toggle {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  cursor: pointer; user-select: none; font-size: 0.78rem; color: #888;
+  padding: 5px 10px; background: #f0f0f0; border-radius: 10px; border: none;
+  transition: background 0.15s; text-align: left; width: 100%;
+}
+.steps-toggle:hover { background: #e8e8e8; }
+.steps-toggle .arrow { display: inline-block; transition: transform 0.2s; font-size: 0.65rem; flex-shrink: 0; }
+.steps-group.collapsed .arrow { transform: rotate(-90deg); }
+.steps-group:not(.collapsed) .arrow { transform: rotate(0deg); }
+.steps-toggle .step-summary { flex-shrink: 0; }
+.steps-toggle .tool-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.tool-chip {
+  font-size: 0.7rem; padding: 1px 7px; border-radius: 8px;
+  background: #dde; color: #4444bb; font-family: monospace;
+  border: 1px solid #cce; white-space: nowrap;
+}
+.skill-chip {
+  font-size: 0.7rem; padding: 1px 7px; border-radius: 8px;
+  background: #e8f5e9; color: #2e7d32; font-family: monospace;
+  border: 1px solid #c8e6c9; white-space: nowrap;
+}
+.steps-group.running .steps-toggle { background: #eef3ff; color: #666; }
+.steps-content { margin-top: 4px; padding: 0; overflow: hidden; transition: max-height 0.3s ease; }
+.steps-group.collapsed .steps-content { max-height: 0 !important; }
+.steps-content .step-item {
+  font-size: 0.78rem; padding: 4px 10px; margin: 2px 0;
+  border-radius: 10px; word-break: break-word; white-space: pre-wrap;
+}
+.step-item.progress { color: #777; background: #f5f5f5; }
+.step-item.tool {
+  color: #3030aa; background: #eef; font-family: monospace;
+  border-left: 3px solid #5c5cff; border-radius: 0 10px 10px 0; padding-left: 8px;
+}
 
-  .bubble {
-    padding: 10px 14px; border-radius: 14px; line-height: 1.5;
-    font-size: 0.9rem; word-break: break-word;
-  }
-  .msg.user .bubble {
-    background: #5c5cff; color: #fff; border-bottom-right-radius: 4px;
-  }
-  .msg.bot .bubble {
-    background: #fff; color: #222; border-bottom-left-radius: 4px;
-    box-shadow: 0 1px 4px rgba(0,0,0,.08);
-  }
-  .msg.push .bubble {
-    background: #fff3cd; color: #856404; border-radius: 10px;
-    border: 1px solid #ffc107; font-size: 0.85rem; width: 100%;
-  }
+/* ── Typing indicator ── */
+.typing {
+  align-self: flex-start; display: flex; gap: 5px; padding: 10px 14px;
+  background: #fff; border-radius: 14px; border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+.typing span {
+  width: 7px; height: 7px; background: #999; border-radius: 50%;
+  animation: bounce 1.2s infinite;
+}
+.typing span:nth-child(2) { animation-delay: .2s; }
+.typing span:nth-child(3) { animation-delay: .4s; }
+@keyframes bounce {
+  0%,60%,100% { transform: translateY(0); }
+  30% { transform: translateY(-6px); }
+}
 
-  /* ── Markdown inside bubbles ── */
-  .bubble pre { background: #f6f8fa; border-radius: 6px; padding: 10px;
-                overflow-x: auto; margin: 6px 0; }
-  .bubble code { font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.85em; }
-  .bubble p { margin-bottom: 6px; }
-  .bubble p:last-child { margin-bottom: 0; }
-  .bubble ul, .bubble ol { padding-left: 18px; margin-bottom: 6px; }
-  .bubble h1,.bubble h2,.bubble h3 { margin: 8px 0 4px; }
-  .msg.user .bubble pre { background: #4444cc; }
-  .msg.user .bubble code { color: #ffe; }
+/* ── Input bar ── */
+#input-bar {
+  background: #fff; border-top: 1px solid #e0e0e0;
+  padding: 10px 14px; display: flex; gap: 8px; flex-shrink: 0;
+}
+#msg-input {
+  flex: 1; border: 1px solid #ddd; border-radius: 20px;
+  padding: 8px 16px; font-size: 0.9rem; resize: none; outline: none;
+  max-height: 120px; overflow-y: auto; line-height: 1.4; font-family: inherit;
+}
+#msg-input:focus { border-color: #5c5cff; }
+#send-btn {
+  background: #5c5cff; color: #fff; border: none; border-radius: 20px;
+  padding: 8px 18px; cursor: pointer; font-size: 0.9rem; align-self: flex-end;
+}
+#send-btn:hover { background: #4444dd; }
+#send-btn:disabled { background: #aaa; cursor: default; }
 
-  /* ── Collapsible steps ── */
-  .steps-group {
-    align-self: flex-start; max-width: 92%; margin: 2px 0;
-  }
-  .steps-toggle {
-    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-    cursor: pointer; user-select: none;
-    font-size: 0.78rem; color: #888; padding: 5px 10px;
-    background: #f0f0f0; border-radius: 10px; border: none;
-    transition: background 0.15s; text-align: left; width: 100%;
-  }
-  .steps-toggle:hover { background: #e8e8e8; }
-  .steps-toggle .arrow {
-    display: inline-block; transition: transform 0.2s;
-    font-size: 0.65rem; flex-shrink: 0;
-  }
-  .steps-group.collapsed .arrow { transform: rotate(-90deg); }
-  .steps-group:not(.collapsed) .arrow { transform: rotate(0deg); }
-  .steps-toggle .step-summary { flex-shrink: 0; }
-  .steps-toggle .tool-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-  .tool-chip {
-    font-size: 0.7rem; padding: 1px 7px; border-radius: 8px;
-    background: #dde; color: #4444bb; font-family: monospace;
-    border: 1px solid #cce; white-space: nowrap;
-  }
-  .skill-chip {
-    font-size: 0.7rem; padding: 1px 7px; border-radius: 8px;
-    background: #e8f5e9; color: #2e7d32; font-family: monospace;
-    border: 1px solid #c8e6c9; white-space: nowrap;
-  }
-  .steps-group.running .steps-toggle { background: #eef3ff; color: #666; }
-  .steps-content {
-    margin-top: 4px; padding: 0;
-    overflow: hidden; transition: max-height 0.3s ease;
-  }
-  .steps-group.collapsed .steps-content {
-    max-height: 0 !important;
-  }
-  .steps-content .step-item {
-    font-size: 0.78rem; padding: 4px 10px; margin: 2px 0;
-    border-radius: 10px; word-break: break-word; white-space: pre-wrap;
-  }
-  .step-item.progress { color: #777; background: #f5f5f5; }
-  .step-item.tool {
-    color: #3030aa; background: #eef; font-family: monospace;
-    border-left: 3px solid #5c5cff; border-radius: 0 10px 10px 0; padding-left: 8px;
-  }
+/* ── History divider ── */
+.history-divider {
+  align-self: center; font-size: 0.75rem; color: #aaa;
+  padding: 4px 16px; background: #eee; border-radius: 10px; margin: 4px 0;
+}
 
-  /* ── Typing indicator ── */
-  .typing {
-    align-self: flex-start; display: flex; gap: 5px; padding: 10px 14px;
-    background: #fff; border-radius: 14px; border-bottom-left-radius: 4px;
-    box-shadow: 0 1px 4px rgba(0,0,0,.08);
-  }
-  .typing span {
-    width: 7px; height: 7px; background: #999; border-radius: 50%;
-    animation: bounce 1.2s infinite;
-  }
-  .typing span:nth-child(2) { animation-delay: .2s; }
-  .typing span:nth-child(3) { animation-delay: .4s; }
-  @keyframes bounce {
-    0%,60%,100% { transform: translateY(0); }
-    30% { transform: translateY(-6px); }
-  }
+/* ── Editor Panel ── */
+#editor-panel {
+  width: 0; display: flex; flex-direction: column; background: #fff;
+  border-left: 1px solid #ddd; overflow: hidden;
+  transition: width 0.25s ease;
+  flex-shrink: 0;
+}
+#editor-panel.open {
+  width: 480px;
+}
+#editor-tabs-bar {
+  display: flex; align-items: center; background: #f5f5f5;
+  border-bottom: 1px solid #ddd; flex-shrink: 0; overflow-x: auto;
+  scrollbar-width: none;
+}
+#editor-tabs-bar::-webkit-scrollbar { display: none; }
+#editor-tabs { display: flex; flex-shrink: 0; }
+.editor-tab {
+  display: flex; align-items: center; gap: 5px;
+  padding: 6px 12px; font-size: 0.78rem; cursor: pointer;
+  border-right: 1px solid #ddd; white-space: nowrap;
+  color: #888; background: #f5f5f5;
+  transition: background 0.15s, color 0.15s;
+  max-width: 160px;
+}
+.editor-tab.active { background: #fff; color: #222; border-bottom: 2px solid #5c5cff; }
+.editor-tab:hover:not(.active) { background: #ebebeb; }
+.editor-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.editor-tab-dirty { color: #e67e22; font-size: 0.7rem; }
+.editor-tab-close {
+  background: none; border: none; cursor: pointer; color: #aaa;
+  font-size: 0.75rem; padding: 0 2px; border-radius: 3px; line-height: 1;
+  flex-shrink: 0;
+}
+.editor-tab-close:hover { color: #e74c3c; background: rgba(231,76,60,.15); }
+#editor-close-panel {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: #aaa; font-size: 0.9rem; padding: 6px 10px; flex-shrink: 0;
+}
+#editor-close-panel:hover { color: #333; }
+#editor-toolbar {
+  display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+  border-bottom: 1px solid #eee; flex-shrink: 0; background: #fafafa;
+}
+.editor-tool-btn {
+  background: none; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;
+  color: #555; font-size: 0.75rem; padding: 3px 9px;
+}
+.editor-tool-btn:hover { background: #eee; border-color: #ccc; }
+.editor-tool-btn.active { background: #5c5cff; color: #fff; border-color: #5c5cff; }
+#editor-save-btn { background: #27ae60; color: #fff; border-color: #27ae60; }
+#editor-save-btn:hover { background: #219a52; }
+#editor-body {
+  flex: 1; overflow: hidden; display: flex; flex-direction: column;
+}
+#editor-view-area {
+  flex: 1; overflow: auto; padding: 0;
+}
+#editor-view-area pre {
+  margin: 0; padding: 16px;
+  font-family: 'Fira Code', 'Courier New', monospace;
+  font-size: 0.82rem; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+}
+#editor-edit-area {
+  flex: 1; display: none; flex-direction: column;
+}
+#editor-textarea {
+  flex: 1; width: 100%; border: none; outline: none; resize: none;
+  font-family: 'Fira Code', 'Courier New', monospace;
+  font-size: 0.82rem; line-height: 1.6; padding: 16px;
+  color: #333; background: #fff;
+}
+#editor-statusbar {
+  padding: 3px 12px; font-size: 0.7rem; color: #999;
+  background: #f9f9f9; border-top: 1px solid #eee; flex-shrink: 0;
+  display: flex; gap: 14px; white-space: nowrap; overflow: hidden;
+}
 
-  /* ── Input bar ── */
-  #input-bar {
-    background: #fff; border-top: 1px solid #e0e0e0;
-    padding: 10px 14px; display: flex; gap: 8px; flex-shrink: 0;
-  }
-  #msg-input {
-    flex: 1; border: 1px solid #ddd; border-radius: 20px;
-    padding: 8px 16px; font-size: 0.9rem; resize: none; outline: none;
-    max-height: 120px; overflow-y: auto; line-height: 1.4;
-    font-family: inherit;
-  }
-  #msg-input:focus { border-color: #5c5cff; }
-  #send-btn {
-    background: #5c5cff; color: #fff; border: none; border-radius: 20px;
-    padding: 8px 18px; cursor: pointer; font-size: 0.9rem; align-self: flex-end;
-  }
-  #send-btn:hover { background: #4444dd; }
-  #send-btn:disabled { background: #aaa; cursor: default; }
-
-  /* ── History divider ── */
-  .history-divider {
-    align-self: center; font-size: 0.75rem; color: #aaa;
-    padding: 4px 16px; background: #eee; border-radius: 10px;
-    margin: 4px 0;
-  }
-
-  /* ── Responsive ── */
-  @media (max-width: 600px) {
-    #sidebar { position: absolute; top: 0; left: 0; bottom: 0; z-index: 20; }
-    #sidebar.collapsed { margin-left: -240px; }
-  }
+/* ── Responsive ── */
+@media (max-width: 760px) {
+  #sidebar { position: absolute; top: 0; left: 0; bottom: 0; z-index: 20; }
+  #sidebar.collapsed { margin-left: -240px; }
+  #editor-panel.open { width: 100%; position: absolute; top: 0; right: 0; bottom: 0; z-index: 15; }
+}
 </style>
 </head>
 <body>
@@ -361,7 +457,7 @@
 <!-- Auth Modal -->
 <div id="auth-overlay" class="hidden">
   <div id="auth-box">
-    <h2>🐈 nanobot</h2>
+    <h2>nanobot</h2>
     <p>请输入访问密码</p>
     <input id="auth-password" type="password" placeholder="密码" autocomplete="current-password">
     <div id="auth-error"></div>
@@ -369,26 +465,15 @@
   </div>
 </div>
 
-<!-- File Content Modal -->
-<div id="file-modal-overlay" class="hidden">
-  <div id="file-modal">
-    <div id="file-modal-header">
-      <span id="file-modal-title"></span>
-      <button id="file-modal-close" onclick="closeFileModal()">✕</button>
-    </div>
-    <div id="file-modal-body"><pre id="file-modal-content"></pre></div>
-  </div>
-</div>
-
 <!-- Header -->
 <header>
   <button id="toggle-sidebar" onclick="toggleSidebar()" title="切换侧边栏">☰</button>
   <div id="status-dot" title="WebSocket 状态"></div>
-  <h1>🐈 nanobot</h1>
+  <h1>nanobot</h1>
   <div class="header-spacer"></div>
   <input id="session-input" type="text" value="default" placeholder="新会话 ID" title="输入新会话 ID">
   <button class="btn" onclick="createAndSwitch()">新建会话</button>
-  <button class="btn" onclick="triggerHeartbeat()" title="立即触发一次心跳（测试用）">⚡ 心跳</button>
+  <button class="btn" onclick="triggerHeartbeat()" title="立即触发一次心跳">心跳</button>
   <button class="btn danger" onclick="clearSession()">清除</button>
 </header>
 
@@ -397,32 +482,86 @@
   <div id="sidebar">
     <!-- Tabs -->
     <div id="sidebar-tabs">
-      <button class="tab-btn active" onclick="switchTab('sessions')">会话</button>
-      <button class="tab-btn" onclick="switchTab('files')">文件</button>
+      <button class="tab-btn active" onclick="switchSidebarTab('sessions')">会话</button>
+      <button class="tab-btn" onclick="switchSidebarTab('files')">文件</button>
+      <button class="tab-btn" onclick="switchSidebarTab('search')">搜索</button>
     </div>
 
     <!-- Sessions Panel -->
-    <div id="panel-sessions">
-      <div id="sidebar-header">
-        <span>会话列表</span>
+    <div id="panel-sessions" class="sidebar-panel active">
+      <div id="sidebar-sessions-header">
+        <input id="session-filter" type="text" placeholder="筛选会话…" oninput="filterSessions()" />
         <button onclick="loadSessionList()" title="刷新">↻</button>
       </div>
       <div id="session-list"></div>
     </div>
 
     <!-- Files Panel -->
-    <div id="panel-files">
+    <div id="panel-files" class="sidebar-panel">
+      <div id="files-toolbar">
+        <div id="files-path-bar">
+          <input id="files-path-input" type="text" placeholder="路径…" title="输入路径后按 Enter 导航">
+          <button id="files-workspace-btn" onclick="goWorkspace()" title="跳转到 workspace">[ws]</button>
+          <button id="files-new-btn" onclick="newFile()" title="新建文件">+</button>
+        </div>
+        <div class="files-toolbar-row">
+          <label>
+            <input type="checkbox" id="files-hidden-toggle" onchange="loadFiles(currentFilePath)">
+            显示隐藏文件
+          </label>
+        </div>
+      </div>
       <div id="files-breadcrumb"></div>
       <div id="files-list"></div>
     </div>
+
+    <!-- Search Panel -->
+    <div id="panel-search" class="sidebar-panel">
+      <div id="search-toolbar">
+        <div id="search-mode-toggle">
+          <button class="search-mode-btn active" id="search-mode-filename" onclick="setSearchMode('filename')">文件名</button>
+          <button class="search-mode-btn" id="search-mode-content" onclick="setSearchMode('content')">文件内容</button>
+        </div>
+        <div id="search-input-row">
+          <input id="search-q" type="text" placeholder="搜索…" />
+          <button id="search-btn" onclick="doSearch()">搜索</button>
+        </div>
+      </div>
+      <div id="search-results"></div>
+    </div>
   </div>
 
-  <!-- Chat area -->
-  <div id="chat-wrapper">
+  <!-- Chat Panel -->
+  <div id="chat-panel">
     <div id="chat"></div>
     <div id="input-bar">
       <textarea id="msg-input" rows="1" placeholder="输入消息，Shift+Enter 换行，Enter 发送…"></textarea>
       <button id="send-btn" onclick="sendMessage()">发送</button>
+    </div>
+  </div>
+
+  <!-- Editor Panel -->
+  <div id="editor-panel">
+    <div id="editor-tabs-bar">
+      <div id="editor-tabs"></div>
+      <button id="editor-close-panel" onclick="closeEditorPanel()" title="关闭编辑面板">✕</button>
+    </div>
+    <div id="editor-toolbar">
+      <button class="editor-tool-btn active" id="editor-view-btn" onclick="setEditorMode('view')">预览</button>
+      <button class="editor-tool-btn" id="editor-edit-btn" onclick="setEditorMode('edit')">编辑</button>
+      <button class="editor-tool-btn" id="editor-download-btn" onclick="downloadCurrentFile()">↓ 下载</button>
+      <button class="editor-tool-btn" id="editor-save-btn" onclick="saveCurrentFile()">保存</button>
+    </div>
+    <div id="editor-body">
+      <div id="editor-view-area"><pre><code id="editor-code"></code></pre></div>
+      <div id="editor-edit-area" style="display:none;">
+        <textarea id="editor-textarea" spellcheck="false"></textarea>
+      </div>
+    </div>
+    <div id="editor-statusbar">
+      <span id="editor-stat-path" style="flex:1;overflow:hidden;text-overflow:ellipsis;"></span>
+      <span id="editor-stat-lines"></span>
+      <span id="editor-stat-bytes"></span>
     </div>
   </div>
 </div>
@@ -430,6 +569,7 @@
 <script>
 marked.setOptions({ breaks: true, gfm: true });
 
+// ── Global state ──────────────────────────────────────────────────────────
 let ws = null;
 let busy = false;
 let typingEl = null;
@@ -444,7 +584,18 @@ let skillsUsed = [];
 
 // File browser state
 let currentFilePath = '';
+let allSessions = [];
 
+// Editor state
+// Map<path, {content: string, originalContent: string, dirty: bool}>
+const editorFiles = new Map();
+let editorActiveTab = null; // path
+let editorMode = 'view'; // 'view' | 'edit'
+
+// Search state
+let searchMode = 'filename'; // 'filename' | 'content'
+
+// DOM refs
 const chat        = document.getElementById('chat');
 const input       = document.getElementById('msg-input');
 const sendBtn     = document.getElementById('send-btn');
@@ -453,42 +604,40 @@ const sessInput   = document.getElementById('session-input');
 const sidebar     = document.getElementById('sidebar');
 const sessionList = document.getElementById('session-list');
 
-// ── Auth helpers ─────────────────────────────────────────────────────────
-function apiFetch(url, options = {}) {
-  const headers = { ...(options.headers || {}) };
+// ── Auth helpers ───────────────────────────────────────────────────────────
+function apiFetch(url, options) {
+  options = options || {};
+  var headers = Object.assign({}, options.headers || {});
   if (authToken) headers['X-Token'] = authToken;
-  return fetch(url, { ...options, headers });
+  return fetch(url, Object.assign({}, options, { headers: headers }));
 }
 
 function wsUrl(sid) {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const base = `${proto}://${location.host}/v1/ws/${encodeURIComponent(sid)}`;
-  return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
+  var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  var base = proto + '://' + location.host + '/v1/ws/' + encodeURIComponent(sid);
+  return authToken ? base + '?token=' + encodeURIComponent(authToken) : base;
 }
 
-// ── Boot / Auth flow ─────────────────────────────────────────────────────
+// ── Boot / Auth flow ───────────────────────────────────────────────────────
 async function boot() {
   try {
-    const res = await fetch('/v1/auth/required');
-    const data = await res.json();
+    var res = await fetch('/v1/auth/required');
+    var data = await res.json();
     if (!data.required) {
-      // No password set — fetch a dummy token so all requests work uniformly
-      const r = await fetch('/v1/auth', {
+      var r = await fetch('/v1/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      const d = await r.json();
+      var d = await r.json();
       authToken = d.token || '';
       sessionStorage.setItem('nanobotToken', authToken);
       init();
       return;
     }
-    // Auth required — validate existing token first
     if (authToken) {
-      const probe = await apiFetch('/v1/sessions');
+      var probe = await apiFetch('/v1/sessions');
       if (probe.ok) { init(); return; }
-      // Token invalid or expired
       authToken = '';
       sessionStorage.removeItem('nanobotToken');
     }
@@ -505,17 +654,17 @@ function showAuthModal() {
 }
 
 async function submitAuth() {
-  const pw = document.getElementById('auth-password').value;
-  const errEl = document.getElementById('auth-error');
+  var pw = document.getElementById('auth-password').value;
+  var errEl = document.getElementById('auth-error');
   errEl.textContent = '';
   try {
-    const res = await fetch('/v1/auth', {
+    var res = await fetch('/v1/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: pw }),
     });
     if (res.ok) {
-      const data = await res.json();
+      var data = await res.json();
       authToken = data.token || '';
       sessionStorage.setItem('nanobotToken', authToken);
       document.getElementById('auth-overlay').classList.add('hidden');
@@ -529,28 +678,26 @@ async function submitAuth() {
   }
 }
 
-document.getElementById('auth-password').addEventListener('keydown', (e) => {
+document.getElementById('auth-password').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') submitAuth();
 });
 
 function init() {
   loadSessionList();
-  loadHistory(currentSessionId).then(() => connect());
+  loadHistory(currentSessionId).then(function() { connect(); });
 }
 
-// ── Sidebar tabs ─────────────────────────────────────────────────────────
-function switchTab(tab) {
-  document.querySelectorAll('.tab-btn').forEach((b, i) => {
-    b.classList.toggle('active', (i === 0 && tab === 'sessions') || (i === 1 && tab === 'files'));
+// ── Sidebar tabs ───────────────────────────────────────────────────────────
+function switchSidebarTab(tab) {
+  var tabs = ['sessions', 'files', 'search'];
+  var tabBtns = document.querySelectorAll('#sidebar-tabs .tab-btn');
+  tabs.forEach(function(t, i) {
+    var panel = document.getElementById('panel-' + t);
+    var active = t === tab;
+    tabBtns[i].classList.toggle('active', active);
+    panel.classList.toggle('active', active);
   });
-  const sessPanel = document.getElementById('panel-sessions');
-  const filesPanel = document.getElementById('panel-files');
-  if (tab === 'sessions') {
-    sessPanel.style.display = 'flex';
-    filesPanel.classList.remove('active');
-  } else {
-    sessPanel.style.display = 'none';
-    filesPanel.classList.add('active');
+  if (tab === 'files') {
     loadFiles(currentFilePath || '');
   }
 }
@@ -559,37 +706,51 @@ function toggleSidebar() {
   sidebar.classList.toggle('collapsed');
 }
 
-// ── Session list ──────────────────────────────────────────────────────────
+// ── Session list ───────────────────────────────────────────────────────────
 async function loadSessionList() {
   try {
-    const res = await apiFetch('/v1/sessions');
+    var res = await apiFetch('/v1/sessions');
     if (!res.ok) return;
-    const data = await res.json();
-    const sessions = (data.sessions || []).filter(s => s.key && s.key.startsWith('web:'));
-    sessionList.innerHTML = '';
-
-    if (sessions.length === 0) {
-      sessionList.innerHTML = '<div style="padding:14px;color:#666;font-size:0.8rem;">暂无会话</div>';
-      return;
-    }
-
-    sessions.forEach(s => {
-      const sid = s.key.replace('web:', '');
-      const el = document.createElement('div');
-      el.className = 'session-item' + (sid === currentSessionId ? ' active' : '');
-
-      const updatedAt = s.updated_at ? new Date(s.updated_at).toLocaleString('zh-CN') : '';
-      el.innerHTML = `
-        <div class="session-item-info" onclick="switchSession('${escapeHtml(sid)}')">
-          <span class="session-name">${escapeHtml(sid)}</span>
-          <span class="session-time">${updatedAt}</span>
-        </div>
-        <button class="session-del-btn" title="删除会话" onclick="deleteSession('${escapeHtml(sid)}', event)">✕</button>`;
-      sessionList.appendChild(el);
+    var data = await res.json();
+    allSessions = (data.sessions || []).filter(function(s) {
+      return s.key && s.key.startsWith('web:');
     });
+    renderSessionList(allSessions);
   } catch (e) {
     console.error('Failed to load sessions:', e);
   }
+}
+
+function filterSessions() {
+  var q = document.getElementById('session-filter').value.toLowerCase();
+  var filtered = q
+    ? allSessions.filter(function(s) { return s.key.toLowerCase().includes(q); })
+    : allSessions;
+  renderSessionList(filtered);
+}
+
+function renderSessionList(sessions) {
+  sessionList.innerHTML = '';
+  if (sessions.length === 0) {
+    sessionList.innerHTML = '<div style="padding:14px;color:#666;font-size:0.8rem;">暂无会话</div>';
+    return;
+  }
+  sessions.forEach(function(s) {
+    var sid = s.key.replace('web:', '');
+    var el = document.createElement('div');
+    el.className = 'session-item' + (sid === currentSessionId ? ' active' : '');
+    var updatedAt = s.updated_at ? new Date(s.updated_at).toLocaleString('zh-CN') : '';
+    el.innerHTML =
+      '<div class="session-item-info" onclick="switchSession(\'' + escapeHtml(sid) + '\')">' +
+        '<span class="session-name">' + escapeHtml(sid) + '</span>' +
+        '<span class="session-time">' + updatedAt + '</span>' +
+      '</div>' +
+      '<div class="session-item-actions">' +
+        '<button class="session-action-btn export" title="导出为 Markdown" onclick="exportSession(\'' + escapeHtml(sid) + '\', event)">↓</button>' +
+        '<button class="session-action-btn" title="删除会话" onclick="deleteSession(\'' + escapeHtml(sid) + '\', event)">✕</button>' +
+      '</div>';
+    sessionList.appendChild(el);
+  });
 }
 
 function switchSession(sid) {
@@ -601,150 +762,460 @@ function switchSession(sid) {
   stepsCounter = 0;
   toolsUsed = [];
   skillsUsed = [];
-  loadHistory(sid).then(() => connect());
+  loadHistory(sid).then(function() { connect(); });
   updateActiveSession();
 }
 
 function createAndSwitch() {
-  const sid = sessInput.value.trim();
+  var sid = sessInput.value.trim();
   if (!sid) return;
   switchSession(sid);
 }
 
 function updateActiveSession() {
-  document.querySelectorAll('.session-item').forEach(el => {
-    const nameEl = el.querySelector('.session-name');
+  document.querySelectorAll('.session-item').forEach(function(el) {
+    var nameEl = el.querySelector('.session-name');
     if (nameEl) el.classList.toggle('active', nameEl.textContent === currentSessionId);
   });
 }
 
 async function deleteSession(sid, e) {
   e.stopPropagation();
-  await apiFetch(`/v1/sessions/web:${encodeURIComponent(sid)}`, { method: 'DELETE' });
+  await apiFetch('/v1/sessions/web:' + encodeURIComponent(sid), { method: 'DELETE' });
   if (sid === currentSessionId) {
-    // Switch to 'default' or any other remaining session
     switchSession('default');
   }
   loadSessionList();
 }
 
-// ── File browser ──────────────────────────────────────────────────────────
+async function exportSession(sid, e) {
+  e.stopPropagation();
+  var url = '/v1/sessions/web:' + encodeURIComponent(sid) + '/export?format=md';
+  if (authToken) url += '&token=' + encodeURIComponent(authToken);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'session_' + sid + '.md';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ── File browser ───────────────────────────────────────────────────────────
 function formatSize(bytes) {
   if (bytes === null || bytes === undefined) return '';
   if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function goWorkspace() {
+  loadFiles('');
 }
 
 async function loadFiles(path) {
   currentFilePath = path;
-  const url = '/v1/files' + (path ? '?path=' + encodeURIComponent(path) : '');
+  // Update path input
+  var pathInput = document.getElementById('files-path-input');
+  pathInput.value = path || '';
+
+  var showHidden = document.getElementById('files-hidden-toggle').checked;
+  var url = '/v1/files' + (path ? '?path=' + encodeURIComponent(path) : '');
   try {
-    const res = await apiFetch(url);
+    var res = await apiFetch(url);
     if (!res.ok) { renderFilesError('无法加载目录'); return; }
-    const data = await res.json();
+    var data = await res.json();
     if (data.type === 'file') {
-      showFileModal(data.path || data.name, data.content || '');
-      // Don't change current path since we opened a file
+      openFileInEditor(data.path || data.name, data.content || '');
       return;
     }
-    renderFilesList(data);
+    renderFilesList(data, showHidden);
   } catch (e) {
     renderFilesError('请求失败');
   }
 }
 
 function renderBreadcrumb(path) {
-  const bc = document.getElementById('files-breadcrumb');
-  if (!path) {
+  var bc = document.getElementById('files-breadcrumb');
+  if (!path || path === '') {
     bc.innerHTML = '<span onclick="loadFiles(\'\')">workspace</span>';
     return;
   }
-  const parts = path.split('/').filter(Boolean);
-  let html = '<span onclick="loadFiles(\'\')">workspace</span>';
-  let acc = '';
-  parts.forEach((p, i) => {
+  var parts = path.split('/').filter(Boolean);
+  var html = '<span onclick="loadFiles(\'\')">workspace</span>';
+  var acc = '';
+  parts.forEach(function(p) {
     acc += (acc ? '/' : '') + p;
-    const captured = acc;
-    html += ` / <span onclick="loadFiles('${escapeHtml(captured)}')">${escapeHtml(p)}</span>`;
+    var captured = acc;
+    html += ' / <span onclick="loadFiles(\'' + escapeAttr(captured) + '\')">' + escapeHtml(p) + '</span>';
   });
   bc.innerHTML = html;
 }
 
-function renderFilesList(data) {
+function renderFilesList(data, showHidden) {
   renderBreadcrumb(data.path || '');
-  const list = document.getElementById('files-list');
+  var list = document.getElementById('files-list');
   list.innerHTML = '';
 
-  // Back button if not at root
   if (data.path) {
-    const parentPath = data.path.includes('/') ? data.path.substring(0, data.path.lastIndexOf('/')) : '';
-    const back = document.createElement('div');
+    var parentPath = data.path.includes('/') ? data.path.substring(0, data.path.lastIndexOf('/')) : '';
+    var back = document.createElement('div');
     back.className = 'file-item';
     back.innerHTML = '<span class="file-icon">↩</span><span class="file-name">..</span>';
-    back.onclick = () => loadFiles(parentPath);
+    back.onclick = function() { loadFiles(parentPath); };
     list.appendChild(back);
   }
 
-  const entries = data.entries || [];
+  var entries = (data.entries || []).filter(function(e) {
+    return showHidden || !e.name.startsWith('.');
+  });
+
   if (entries.length === 0) {
     list.innerHTML += '<div style="padding:12px;color:#666;font-size:0.78rem;">空目录</div>';
     return;
   }
 
-  entries.forEach(entry => {
-    const el = document.createElement('div');
+  entries.forEach(function(entry) {
+    var el = document.createElement('div');
     el.className = 'file-item';
-    const icon = entry.type === 'dir' ? '📁' : '📄';
-    const size = entry.type === 'file' ? formatSize(entry.size) : '';
-    el.innerHTML = `<span class="file-icon">${icon}</span>
-      <span class="file-name">${escapeHtml(entry.name)}</span>
-      <span class="file-size">${size}</span>`;
-    el.onclick = () => loadFiles(entry.path);
+    var icon = entry.type === 'dir' ? '📁' : '📄';
+    var size = entry.type === 'file' ? formatSize(entry.size) : '';
+    el.innerHTML =
+      '<span class="file-icon">' + icon + '</span>' +
+      '<span class="file-name">' + escapeHtml(entry.name) + '</span>' +
+      '<span class="file-size">' + size + '</span>';
+    var entryPath = entry.path;
+    el.onclick = function() { loadFiles(entryPath); };
     list.appendChild(el);
   });
 }
 
 function renderFilesError(msg) {
   document.getElementById('files-list').innerHTML =
-    `<div style="padding:12px;color:#e74c3c;font-size:0.78rem;">${escapeHtml(msg)}</div>`;
+    '<div style="padding:12px;color:#e74c3c;font-size:0.78rem;">' + escapeHtml(msg) + '</div>';
 }
 
-function showFileModal(title, content) {
-  document.getElementById('file-modal-title').textContent = title;
-  document.getElementById('file-modal-content').textContent = content;
-  document.getElementById('file-modal-overlay').classList.remove('hidden');
+// Handle path input Enter key
+document.getElementById('files-path-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    var path = e.target.value.trim();
+    loadFiles(path);
+  }
+});
+
+function newFile() {
+  var name = prompt('新文件名（在当前目录下）：');
+  if (!name) return;
+  var path = currentFilePath ? currentFilePath + '/' + name : name;
+  openFileInEditor(path, '');
 }
 
-function closeFileModal() {
-  document.getElementById('file-modal-overlay').classList.add('hidden');
+// ── Search ─────────────────────────────────────────────────────────────────
+function setSearchMode(mode) {
+  searchMode = mode;
+  document.getElementById('search-mode-filename').classList.toggle('active', mode === 'filename');
+  document.getElementById('search-mode-content').classList.toggle('active', mode === 'content');
 }
 
-// Close file modal on overlay click
-document.getElementById('file-modal-overlay').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('file-modal-overlay')) closeFileModal();
+// Fix: the onkeydown was written inline with 'e' not defined properly; handle via event listener
+document.getElementById('search-q').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doSearch();
+});
+
+async function doSearch() {
+  var q = document.getElementById('search-q').value.trim();
+  if (!q) return;
+  var resultsEl = document.getElementById('search-results');
+  resultsEl.innerHTML = '<div style="padding:10px;color:#888;font-size:0.78rem;">搜索中…</div>';
+
+  try {
+    var endpoint = searchMode === 'filename' ? '/v1/search/files' : '/v1/search/content';
+    var url = endpoint + '?q=' + encodeURIComponent(q);
+    var res = await apiFetch(url);
+    if (!res.ok) { resultsEl.innerHTML = '<div style="padding:10px;color:#e74c3c;font-size:0.78rem;">搜索失败</div>'; return; }
+    var data = await res.json();
+    renderSearchResults(data.results || [], searchMode);
+  } catch (err) {
+    resultsEl.innerHTML = '<div style="padding:10px;color:#e74c3c;font-size:0.78rem;">请求失败</div>';
+  }
+}
+
+function renderSearchResults(results, mode) {
+  var el = document.getElementById('search-results');
+  el.innerHTML = '';
+  if (results.length === 0) {
+    el.innerHTML = '<div style="padding:10px;color:#888;font-size:0.78rem;">无结果</div>';
+    return;
+  }
+  results.forEach(function(r) {
+    var item = document.createElement('div');
+    item.className = 'search-result-item';
+    if (mode === 'filename') {
+      var icon = r.type === 'dir' ? '📁' : '📄';
+      item.innerHTML =
+        '<div class="search-result-name">' + icon + ' ' + escapeHtml(r.name) + '</div>' +
+        '<div class="search-result-path">' + escapeHtml(r.path) + '</div>';
+      var rPath = r.path;
+      item.onclick = function() { loadFiles(rPath); };
+    } else {
+      item.innerHTML =
+        '<div class="search-result-path">' + escapeHtml(r.file) + '</div>' +
+        '<div class="search-result-line">行 ' + r.line + '</div>' +
+        '<div class="search-result-preview">' + escapeHtml(r.preview) + '</div>';
+      var rFile = r.file;
+      var rLine = r.line;
+      item.onclick = function() { openFileFromSearch(rFile, rLine); };
+    }
+    el.appendChild(item);
+  });
+}
+
+async function openFileFromSearch(filePath, lineNum) {
+  // Load file content and open in editor
+  try {
+    var url = '/v1/files?path=' + encodeURIComponent(filePath);
+    var res = await apiFetch(url);
+    if (!res.ok) return;
+    var data = await res.json();
+    if (data.type === 'file') {
+      openFileInEditor(filePath, data.content || '');
+      // TODO: scroll to lineNum in view mode
+    }
+  } catch (e) {
+    console.error('Failed to open file:', e);
+  }
+}
+
+// ── Editor Panel ───────────────────────────────────────────────────────────
+function openEditorPanel() {
+  document.getElementById('editor-panel').classList.add('open');
+}
+
+function closeEditorPanel() {
+  document.getElementById('editor-panel').classList.remove('open');
+}
+
+function openFileInEditor(path, content) {
+  if (!editorFiles.has(path)) {
+    editorFiles.set(path, { content: content, originalContent: content, dirty: false });
+  } else {
+    // Update originalContent only if not already dirty
+    var existing = editorFiles.get(path);
+    if (!existing.dirty) {
+      existing.content = content;
+      existing.originalContent = content;
+    }
+  }
+  editorActiveTab = path;
+  openEditorPanel();
+  renderEditorTabs();
+  renderEditorContent();
+}
+
+function renderEditorTabs() {
+  var tabsEl = document.getElementById('editor-tabs');
+  tabsEl.innerHTML = '';
+  editorFiles.forEach(function(state, path) {
+    var tab = document.createElement('div');
+    tab.className = 'editor-tab' + (path === editorActiveTab ? ' active' : '');
+    var filename = path.split('/').pop();
+    tab.innerHTML =
+      '<span class="editor-tab-name" title="' + escapeAttr(path) + '">' + escapeHtml(filename) + '</span>' +
+      (state.dirty ? '<span class="editor-tab-dirty">●</span>' : '') +
+      '<button class="editor-tab-close" onclick="closeEditorTab(\'' + escapeAttr(path) + '\', event)" title="关闭">×</button>';
+    var tabPath = path;
+    tab.onclick = function(e) {
+      if (e.target.classList.contains('editor-tab-close')) return;
+      switchEditorTab(tabPath);
+    };
+    tabsEl.appendChild(tab);
+  });
+}
+
+function switchEditorTab(path) {
+  // Save current textarea content before switching
+  saveCurrentTabContent();
+  editorActiveTab = path;
+  renderEditorTabs();
+  renderEditorContent();
+}
+
+function saveCurrentTabContent() {
+  if (!editorActiveTab) return;
+  var state = editorFiles.get(editorActiveTab);
+  if (!state) return;
+  if (editorMode === 'edit') {
+    var ta = document.getElementById('editor-textarea');
+    state.content = ta.value;
+    state.dirty = state.content !== state.originalContent;
+  }
+}
+
+function closeEditorTab(path, e) {
+  e.stopPropagation();
+  var state = editorFiles.get(path);
+  if (state && state.dirty) {
+    if (!confirm('文件 "' + path.split('/').pop() + '" 有未保存的更改，确定关闭？')) return;
+  }
+  editorFiles.delete(path);
+  if (editorActiveTab === path) {
+    var keys = Array.from(editorFiles.keys());
+    editorActiveTab = keys.length > 0 ? keys[keys.length - 1] : null;
+  }
+  if (!editorActiveTab) {
+    closeEditorPanel();
+  } else {
+    renderEditorTabs();
+    renderEditorContent();
+  }
+}
+
+function renderEditorContent() {
+  if (!editorActiveTab) return;
+  var state = editorFiles.get(editorActiveTab);
+  if (!state) return;
+
+  var content = state.content || '';
+
+  // Update status bar
+  var lines = content.split('\n').length;
+  var bytes = new TextEncoder().encode(content).length;
+  document.getElementById('editor-stat-path').textContent = editorActiveTab;
+  document.getElementById('editor-stat-lines').textContent = lines + ' 行';
+  document.getElementById('editor-stat-bytes').textContent = formatSize(bytes);
+
+  if (editorMode === 'view') {
+    var codeEl = document.getElementById('editor-code');
+    codeEl.textContent = content;
+    var ext = editorActiveTab.split('.').pop().toLowerCase();
+    var langMap = {
+      py: 'python', js: 'javascript', ts: 'typescript', sh: 'bash',
+      bash: 'bash', json: 'json', md: 'markdown', css: 'css',
+      html: 'xml', xml: 'xml', htm: 'xml'
+    };
+    codeEl.className = '';
+    if (langMap[ext]) {
+      codeEl.classList.add('language-' + langMap[ext]);
+    }
+    hljs.highlightElement(codeEl);
+  } else {
+    document.getElementById('editor-textarea').value = content;
+  }
+}
+
+function setEditorMode(mode) {
+  saveCurrentTabContent();
+  editorMode = mode;
+  var viewBtn = document.getElementById('editor-view-btn');
+  var editBtn = document.getElementById('editor-edit-btn');
+  var viewArea = document.getElementById('editor-view-area');
+  var editArea = document.getElementById('editor-edit-area');
+
+  viewBtn.classList.toggle('active', mode === 'view');
+  editBtn.classList.toggle('active', mode === 'edit');
+
+  if (mode === 'view') {
+    viewArea.style.display = '';
+    editArea.style.display = 'none';
+  } else {
+    viewArea.style.display = 'none';
+    editArea.style.display = 'flex';
+    editArea.style.flex = '1';
+    // Also fix the textarea container
+    document.getElementById('editor-body').style.display = 'flex';
+    document.getElementById('editor-body').style.flexDirection = 'column';
+  }
+  renderEditorContent();
+}
+
+async function saveCurrentFile() {
+  saveCurrentTabContent();
+  if (!editorActiveTab) return;
+  var state = editorFiles.get(editorActiveTab);
+  if (!state) return;
+
+  try {
+    var res = await apiFetch('/v1/files', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: editorActiveTab, content: state.content }),
+    });
+    if (res.ok) {
+      state.originalContent = state.content;
+      state.dirty = false;
+      renderEditorTabs();
+      appendSystem('文件已保存：' + editorActiveTab);
+    } else {
+      var err = await res.json();
+      alert('保存失败：' + (err.detail || res.status));
+    }
+  } catch (e) {
+    alert('保存失败：' + e.message);
+  }
+}
+
+function downloadCurrentFile() {
+  if (!editorActiveTab) return;
+  var url = '/v1/files/download?path=' + encodeURIComponent(editorActiveTab);
+  if (authToken) url += '&token=' + encodeURIComponent(authToken);
+  window.open(url, '_blank');
+}
+
+// Track textarea changes for dirty detection
+document.getElementById('editor-textarea').addEventListener('input', function() {
+  if (!editorActiveTab) return;
+  var state = editorFiles.get(editorActiveTab);
+  if (!state) return;
+  state.content = this.value;
+  state.dirty = state.content !== state.originalContent;
+  // Update dirty indicator on tab without full re-render
+  var tabs = document.querySelectorAll('.editor-tab');
+  var keys = Array.from(editorFiles.keys());
+  var idx = keys.indexOf(editorActiveTab);
+  if (idx >= 0 && tabs[idx]) {
+    var dirtyEl = tabs[idx].querySelector('.editor-tab-dirty');
+    if (state.dirty && !dirtyEl) {
+      var nameEl = tabs[idx].querySelector('.editor-tab-name');
+      var span = document.createElement('span');
+      span.className = 'editor-tab-dirty';
+      span.textContent = '●';
+      nameEl.after(span);
+    } else if (!state.dirty && dirtyEl) {
+      dirtyEl.remove();
+    }
+  }
+});
+
+// Ctrl+S to save
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    var editorPanelEl = document.getElementById('editor-panel');
+    if (editorPanelEl.classList.contains('open')) {
+      e.preventDefault();
+      saveCurrentFile();
+    }
+  }
 });
 
 // ── History loading ────────────────────────────────────────────────────────
 async function loadHistory(sid) {
   try {
-    const res = await apiFetch(`/v1/sessions/web:${encodeURIComponent(sid)}/messages`);
+    var res = await apiFetch('/v1/sessions/web:' + encodeURIComponent(sid) + '/messages');
     if (!res.ok) return;
-    const data = await res.json();
-    const messages = data.messages || [];
+    var data = await res.json();
+    var messages = data.messages || [];
     if (messages.length === 0) return;
 
-    const divider = document.createElement('div');
+    var divider = document.createElement('div');
     divider.className = 'history-divider';
-    divider.textContent = `── 历史记录 (${messages.length} 条) ──`;
+    divider.textContent = '── 历史记录 (' + messages.length + ' 条) ──';
     chat.appendChild(divider);
 
-    messages.forEach(m => {
+    messages.forEach(function(m) {
       if (m.role === 'user') appendUser(m.content, true);
       else if (m.role === 'assistant') appendBot(m.content, true);
     });
 
-    const endDivider = document.createElement('div');
+    var endDivider = document.createElement('div');
     endDivider.className = 'history-divider';
     endDivider.textContent = '── 历史记录结束 ──';
     chat.appendChild(endDivider);
@@ -754,27 +1225,27 @@ async function loadHistory(sid) {
   }
 }
 
-// ── WebSocket ─────────────────────────────────────────────────────────────
+// ── WebSocket ──────────────────────────────────────────────────────────────
 function connect() {
-  const sid = currentSessionId;
+  var sid = currentSessionId;
   ws = new WebSocket(wsUrl(sid));
 
-  ws.onopen = () => {
+  ws.onopen = function() {
     dot.className = 'connected';
-    appendSystem(`已连接到会话「${sid}」`);
+    appendSystem('已连接到会话「' + sid + '」');
     loadSessionList();
   };
 
-  ws.onclose = () => {
+  ws.onclose = function() {
     dot.className = '';
     appendSystem('连接断开，5 秒后重连…');
     setTimeout(connect, 5000);
   };
 
-  ws.onerror = () => ws.close();
+  ws.onerror = function() { ws.close(); };
 
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
+  ws.onmessage = function(e) {
+    var msg = JSON.parse(e.data);
     if (msg.type === 'progress') {
       removeTyping();
       appendStep(msg.content, false);
@@ -799,9 +1270,9 @@ function connect() {
   };
 }
 
-// ── Send ──────────────────────────────────────────────────────────────────
+// ── Send ───────────────────────────────────────────────────────────────────
 function sendMessage() {
-  const text = input.value.trim();
+  var text = input.value.trim();
   if (!text || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
   appendUser(text);
   ws.send(JSON.stringify({ content: text }));
@@ -815,33 +1286,33 @@ function sendMessage() {
   setBusy(true);
 }
 
-input.addEventListener('keydown', (e) => {
+input.addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
-input.addEventListener('input', () => {
+input.addEventListener('input', function() {
   input.style.height = '';
   input.style.height = Math.min(input.scrollHeight, 120) + 'px';
 });
 
-// ── Session clear ─────────────────────────────────────────────────────────
+// ── Session clear ──────────────────────────────────────────────────────────
 async function clearSession() {
-  const sid = currentSessionId;
-  await apiFetch(`/v1/sessions/web:${encodeURIComponent(sid)}`, { method: 'DELETE' });
+  var sid = currentSessionId;
+  await apiFetch('/v1/sessions/web:' + encodeURIComponent(sid), { method: 'DELETE' });
   chat.innerHTML = '';
   currentStepsGroup = null;
   stepsCounter = 0;
   toolsUsed = [];
-  appendSystem(`会话「${sid}」已清除`);
+  appendSystem('会话「' + sid + '」已清除');
   loadSessionList();
 }
 
 async function triggerHeartbeat() {
   try {
-    appendSystem('⚡ 触发心跳中…');
-    const res = await apiFetch('/v1/heartbeat/trigger', { method: 'POST' });
-    const data = await res.json();
+    appendSystem('触发心跳中…');
+    var res = await apiFetch('/v1/heartbeat/trigger', { method: 'POST' });
+    var data = await res.json();
     if (data.error) {
-      appendSystem(`心跳触发失败：${data.error}`);
+      appendSystem('心跳触发失败：' + data.error);
     } else {
       appendSystem('心跳已触发，结果将以推送形式送达（若有任务）');
     }
@@ -850,7 +1321,7 @@ async function triggerHeartbeat() {
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────
 function setBusy(v) {
   busy = v;
   sendBtn.disabled = v;
@@ -865,58 +1336,61 @@ function renderMarkdown(md) {
 }
 
 function appendUser(text, isHistory) {
-  const el = document.createElement('div');
+  var el = document.createElement('div');
   el.className = 'msg user';
   if (isHistory) el.style.opacity = '0.85';
-  el.innerHTML = `<div class="avatar">👤</div>
-    <div class="bubble">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
+  el.innerHTML =
+    '<div class="avatar">👤</div>' +
+    '<div class="bubble">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div>';
   chat.appendChild(el);
   if (!isHistory) scrollBottom();
 }
 
 function appendBot(text, isHistory) {
-  const el = document.createElement('div');
+  var el = document.createElement('div');
   el.className = 'msg bot';
   if (isHistory) el.style.opacity = '0.85';
-  el.innerHTML = `<div class="avatar">🐈</div>
-    <div class="bubble">${renderMarkdown(text)}</div>`;
+  el.innerHTML =
+    '<div class="avatar">🐈</div>' +
+    '<div class="bubble">' + renderMarkdown(text) + '</div>';
   chat.appendChild(el);
   if (!isHistory) scrollBottom();
 }
 
 function appendPush(text) {
-  const el = document.createElement('div');
+  var el = document.createElement('div');
   el.className = 'msg push';
-  el.innerHTML = `<div class="avatar">🔔</div>
-    <div class="bubble"><strong>系统通知</strong><br>${renderMarkdown(text)}</div>`;
+  el.innerHTML =
+    '<div class="avatar">🔔</div>' +
+    '<div class="bubble"><strong>系统通知</strong><br>' + renderMarkdown(text) + '</div>';
   chat.appendChild(el);
   scrollBottom();
 }
 
 function appendSystem(text) {
-  const el = document.createElement('div');
+  var el = document.createElement('div');
   el.className = 'history-divider';
-  el.textContent = `ℹ️ ${text}`;
+  el.textContent = 'i ' + text;
   chat.appendChild(el);
   scrollBottom();
 }
 
-// ── Collapsible steps ─────────────────────────────────────────────────────
+// ── Collapsible steps ──────────────────────────────────────────────────────
 function ensureStepsGroup() {
   if (currentStepsGroup) return currentStepsGroup;
 
-  const group = document.createElement('div');
+  var group = document.createElement('div');
   group.className = 'steps-group running';
 
-  const toggle = document.createElement('button');
+  var toggle = document.createElement('button');
   toggle.className = 'steps-toggle';
-  toggle.innerHTML = `
-    <span class="arrow">▼</span>
-    <span class="step-summary">⏳ 思考中…</span>
-    <span class="tool-chips"></span>`;
-  toggle.onclick = () => group.classList.toggle('collapsed');
+  toggle.innerHTML =
+    '<span class="arrow">▼</span>' +
+    '<span class="step-summary">思考中…</span>' +
+    '<span class="tool-chips"></span>';
+  toggle.onclick = function() { group.classList.toggle('collapsed'); };
 
-  const content = document.createElement('div');
+  var content = document.createElement('div');
   content.className = 'steps-content';
 
   group.appendChild(toggle);
@@ -928,21 +1402,21 @@ function ensureStepsGroup() {
 }
 
 function extractToolName(text) {
-  const m = text.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*[(\s"']?/);
+  var m = text.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*[(\s"']?/);
   return m ? m[1] : text.split(/[\s("]/)[0];
 }
 
 function updateToggleChips(group) {
-  const chipsEl = group.querySelector('.tool-chips');
+  var chipsEl = group.querySelector('.tool-chips');
   chipsEl.innerHTML = '';
-  skillsUsed.forEach(name => {
-    const chip = document.createElement('span');
+  skillsUsed.forEach(function(name) {
+    var chip = document.createElement('span');
     chip.className = 'skill-chip';
     chip.textContent = '✦ ' + name;
     chipsEl.appendChild(chip);
   });
-  toolsUsed.forEach(name => {
-    const chip = document.createElement('span');
+  toolsUsed.forEach(function(name) {
+    var chip = document.createElement('span');
     chip.className = 'tool-chip';
     chip.textContent = name;
     chipsEl.appendChild(chip);
@@ -951,43 +1425,43 @@ function updateToggleChips(group) {
 
 function appendSkillUsed(skillName) {
   if (!skillsUsed.includes(skillName)) skillsUsed.push(skillName);
-  const group = ensureStepsGroup();
+  var group = ensureStepsGroup();
   updateToggleChips(group);
 }
 
 function appendStep(text, isTool) {
-  const group = ensureStepsGroup();
-  const content = group.querySelector('.steps-content');
+  var group = ensureStepsGroup();
+  var content = group.querySelector('.steps-content');
 
-  const el = document.createElement('div');
+  var el = document.createElement('div');
   el.className = 'step-item ' + (isTool ? 'tool' : 'progress');
-  el.textContent = isTool ? `⚙️ ${text}` : `💭 ${text.slice(0, 400)}`;
+  el.textContent = isTool ? ('⚙ ' + text) : ('💭 ' + text.slice(0, 400));
   content.appendChild(el);
   stepsCounter++;
 
   if (isTool) {
-    const toolName = extractToolName(text);
+    var toolName = extractToolName(text);
     if (toolName && !toolsUsed.includes(toolName)) toolsUsed.push(toolName);
     updateToggleChips(group);
   }
 
-  const summary = group.querySelector('.step-summary');
-  summary.textContent = `⏳ 思考中… (${stepsCounter} 步)`;
-  content.style.maxHeight = content.scrollHeight + 40 + 'px';
+  var summary = group.querySelector('.step-summary');
+  summary.textContent = '思考中… (' + stepsCounter + ' 步)';
+  content.style.maxHeight = (content.scrollHeight + 40) + 'px';
   scrollBottom();
 }
 
 function finalizeCurrentSteps() {
   if (!currentStepsGroup) return;
-  const group = currentStepsGroup;
+  var group = currentStepsGroup;
   group.classList.remove('running');
 
-  const summary = group.querySelector('.step-summary');
-  const parts = [];
-  if (skillsUsed.length) parts.push(`${skillsUsed.length} 个技能`);
-  if (toolsUsed.length) parts.push(`${toolsUsed.length} 个工具`);
-  const toolLabel = parts.length ? `使用了 ${parts.join(' · ')}` : '纯推理';
-  summary.textContent = `✅ 完成 · ${stepsCounter} 步 · ${toolLabel}`;
+  var summary = group.querySelector('.step-summary');
+  var parts = [];
+  if (skillsUsed.length) parts.push(skillsUsed.length + ' 个技能');
+  if (toolsUsed.length) parts.push(toolsUsed.length + ' 个工具');
+  var toolLabel = parts.length ? '使用了 ' + parts.join(' · ') : '纯推理';
+  summary.textContent = '✅ 完成 · ' + stepsCounter + ' 步 · ' + toolLabel;
 
   currentStepsGroup = null;
   stepsCounter = 0;
@@ -1012,11 +1486,18 @@ function removeTyping() {
 }
 
 function escapeHtml(t) {
-  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;')
-          .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(t)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
-// ── Start ─────────────────────────────────────────────────────────────────
+function escapeAttr(t) {
+  return String(t).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+}
+
+// ── Start ──────────────────────────────────────────────────────────────────
 boot();
 </script>
 </body>

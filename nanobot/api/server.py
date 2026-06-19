@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
+from pydantic import BaseModel
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -51,12 +52,18 @@ class ConnectionManager:
         return list(self._connections.keys())
 
 
+class FileSaveRequest(BaseModel):
+    path: str
+    content: str
+
+
 def create_app(
     agent: AgentLoop,
     bus: MessageBus,
     ui_path: Path,
     heartbeat=None,
     password: str | None = None,
+    allow_host_paths: bool = False,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -70,6 +77,24 @@ def create_app(
         token = request.headers.get("X-Token") or request.query_params.get("token")
         if not token or token not in _tokens:
             raise HTTPException(status_code=401, detail="Unauthorized")
+
+    def _resolve_path(path: str) -> Path:
+        """Resolve a path according to allow_host_paths setting.
+
+        Returns the resolved absolute Path.
+        Raises HTTPException 403 if path escapes workspace when not allow_host_paths.
+        """
+        workspace = agent.context.workspace.resolve()
+        if allow_host_paths and path and Path(path).is_absolute():
+            target = Path(path).resolve()
+        else:
+            target = (workspace / path).resolve() if path else workspace
+            # Restrict to workspace subtree
+            try:
+                target.relative_to(workspace)
+            except ValueError:
+                raise HTTPException(status_code=403, detail="Path outside workspace")
+        return target
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -92,7 +117,7 @@ def create_app(
                 if msg.metadata.get("_progress"):
                     continue
                 key = f"{msg.channel}:{msg.chat_id}"
-                logger.info("Dispatch push → {} ({} chars)", key, len(msg.content or ""))
+                logger.info("Dispatch push -> {} ({} chars)", key, len(msg.content or ""))
                 await manager.send(key, {"type": "push", "content": msg.content})
             except asyncio.CancelledError:
                 break
@@ -181,29 +206,70 @@ def create_app(
                 history.append({"role": role, "content": content})
         return {"messages": history}
 
+    @app.get("/v1/sessions/{session_id:path}/export")
+    async def export_session(session_id: str, request: Request, format: str = Query("md")):
+        """Export a session as a markdown file download."""
+        _check_token(request)
+        import tempfile
+
+        session = agent.sessions.get_or_create(session_id)
+        lines = []
+        for m in session.messages:
+            role = m.get("role")
+            content = m.get("content", "")
+            if not content:
+                continue
+            if role == "user":
+                lines.append(f"**You:** {content}\n")
+            elif role == "assistant":
+                lines.append(f"**nanobot:** {content}\n")
+
+        md_content = "\n".join(lines)
+
+        # Write to a temp file for FileResponse
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        )
+        tmp.write(md_content)
+        tmp.flush()
+        tmp.close()
+
+        safe_id = session_id.replace("/", "_").replace(":", "_")
+        filename = f"session_{safe_id}.md"
+        return FileResponse(
+            tmp.name,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     # ------------------------------------------------------------------ Files
     @app.get("/v1/files")
     async def list_files(request: Request, path: str = Query("")):
-        """Browse the workspace directory tree."""
+        """Browse the workspace directory tree (or host if allow_host_paths)."""
         _check_token(request)
         workspace = agent.context.workspace.resolve()
-        target = (workspace / path).resolve() if path else workspace
-        # Restrict to workspace subtree
-        try:
-            target.relative_to(workspace)
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Path outside workspace")
+        target = _resolve_path(path)
+
         if not target.exists():
             raise HTTPException(status_code=404, detail="Path not found")
 
-        rel = str(target.relative_to(workspace)) if target != workspace else ""
-
         if target.is_file():
+            # Return relative path if within workspace, else absolute
+            try:
+                rel = str(target.relative_to(workspace))
+            except ValueError:
+                rel = str(target)
             try:
                 content = target.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 content = "(binary file)"
             return {"type": "file", "path": rel, "name": target.name, "content": content}
+
+        # Directory listing
+        try:
+            rel = str(target.relative_to(workspace)) if target != workspace else ""
+        except ValueError:
+            rel = str(target)
 
         entries = []
         for entry in sorted(target.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
@@ -211,21 +277,150 @@ def create_app(
                 size = entry.stat().st_size if entry.is_file() else None
             except OSError:
                 size = None
+            # Path for the entry
+            try:
+                entry_path = str(entry.relative_to(workspace))
+            except ValueError:
+                entry_path = str(entry)
             entries.append({
                 "name": entry.name,
                 "type": "dir" if entry.is_dir() else "file",
                 "size": size,
-                "path": str(entry.relative_to(workspace)),
+                "path": entry_path,
             })
         return {"type": "dir", "path": rel, "entries": entries}
 
+    @app.put("/v1/files")
+    async def save_file(request: Request, body: FileSaveRequest):
+        """Save (write) file content to disk."""
+        _check_token(request)
+        target = _resolve_path(body.path)
+
+        if target.is_dir():
+            raise HTTPException(status_code=400, detail="Path is a directory")
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        encoded = body.content.encode("utf-8")
+        target.write_bytes(encoded)
+        return {"ok": True, "bytes": len(encoded)}
+
+    @app.get("/v1/files/download")
+    async def download_file(request: Request, path: str = Query(...)):
+        """Download a file as an attachment."""
+        _check_token(request)
+        target = _resolve_path(path)
+
+        if not target.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+        if target.is_dir():
+            raise HTTPException(status_code=400, detail="Path is a directory")
+
+        return FileResponse(
+            target,
+            filename=target.name,
+            headers={"Content-Disposition": f'attachment; filename="{target.name}"'},
+        )
+
+    # ------------------------------------------------------------------ Search
+    @app.get("/v1/search/files")
+    async def search_files(
+        request: Request,
+        q: str = Query(...),
+        path: str = Query(""),
+        max: int = Query(100),
+    ):
+        """Search filenames (case-insensitive substring match)."""
+        _check_token(request)
+        root = _resolve_path(path) if path else agent.context.workspace.resolve()
+
+        if not root.exists():
+            raise HTTPException(status_code=404, detail="Search root not found")
+
+        results: list[dict] = []
+        q_lower = q.lower()
+
+        def _walk(d: Path) -> None:
+            if len(results) >= max:
+                return
+            try:
+                entries = list(d.iterdir())
+            except PermissionError:
+                return
+            for entry in entries:
+                if len(results) >= max:
+                    return
+                if q_lower in entry.name.lower():
+                    results.append({
+                        "name": entry.name,
+                        "path": str(entry),
+                        "type": "dir" if entry.is_dir() else "file",
+                    })
+                if entry.is_dir():
+                    _walk(entry)
+
+        _walk(root)
+        return {"results": results}
+
+    @app.get("/v1/search/content")
+    async def search_content(
+        request: Request,
+        q: str = Query(...),
+        path: str = Query(""),
+        max: int = Query(50),
+    ):
+        """Search file contents (grep-like, case-insensitive)."""
+        _check_token(request)
+        root = _resolve_path(path) if path else agent.context.workspace.resolve()
+
+        if not root.exists():
+            raise HTTPException(status_code=404, detail="Search root not found")
+
+        results: list[dict] = []
+        q_lower = q.lower()
+        MAX_FILE_SIZE = 512 * 1024  # 512 KB
+
+        def _walk(d: Path) -> None:
+            if len(results) >= max:
+                return
+            try:
+                entries = list(d.iterdir())
+            except PermissionError:
+                return
+            for entry in entries:
+                if len(results) >= max:
+                    return
+                if entry.is_dir():
+                    _walk(entry)
+                elif entry.is_file():
+                    try:
+                        if entry.stat().st_size > MAX_FILE_SIZE:
+                            continue
+                    except OSError:
+                        continue
+                    try:
+                        text = entry.read_text(encoding="utf-8")
+                    except (UnicodeDecodeError, OSError):
+                        continue
+                    for lineno, line in enumerate(text.splitlines(), 1):
+                        if len(results) >= max:
+                            return
+                        if q_lower in line.lower():
+                            results.append({
+                                "file": str(entry),
+                                "line": lineno,
+                                "preview": line.strip()[:200],
+                            })
+
+        _walk(root)
+        return {"results": results}
+
     # ---- Diagnostic: push a test message to verify the WS push pipeline ----
     @app.post("/v1/test-push/{session_id}")
-    async def test_push(session_id: str, request: Request, content: str = "🔔 Test push notification"):
+    async def test_push(session_id: str, request: Request, content: str = "Test push notification"):
         _check_token(request)
         key = f"web:{session_id}"
         keys = manager.connected_keys()
-        logger.info("test-push → key={}, connected_keys={}", key, keys)
+        logger.info("test-push -> key={}, connected_keys={}", key, keys)
         await manager.send(key, {"type": "push", "content": content})
         return {"ok": True, "key": key, "connected_keys": keys}
 
