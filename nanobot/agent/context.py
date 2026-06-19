@@ -79,6 +79,14 @@ Your workspace is at: {workspace_path}
 - If a tool call fails, analyze the error before retrying with a different approach.
 - Ask for clarification when the request is ambiguous.
 
+## Rich Formatting
+Your replies are rendered as Markdown in a web UI. Use it to improve clarity:
+- Use **Markdown tables** for structured/tabular data and comparisons.
+- For flowcharts, sequence/architecture diagrams, gantt or pie charts, emit a
+  fenced ```mermaid code block with valid Mermaid syntax — it renders as a diagram.
+- Use fenced code blocks with a language tag (```python, ```sql, …) for code; it is syntax-highlighted.
+Only use diagrams/tables when they genuinely aid understanding — don't force them.
+
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 
     @staticmethod

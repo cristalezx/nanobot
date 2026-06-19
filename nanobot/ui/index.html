@@ -8,6 +8,7 @@
 <script src="/vendor/marked.min.js"></script>
 <script src="/vendor/highlight.min.js"></script>
 <script src="/vendor/mammoth.browser.min.js"></script>
+<script src="/vendor/mermaid.min.js"></script>
 <link rel="stylesheet" href="/vendor/github.min.css">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -292,6 +293,22 @@ body.resizing iframe { pointer-events: none; }
 .bubble h1,.bubble h2,.bubble h3 { margin: 8px 0 4px; }
 .msg.user .bubble pre { background: #4444cc; }
 .msg.user .bubble code { color: #ffe; }
+/* Tables rendered from markdown (GFM) */
+.bubble table { border-collapse: collapse; margin: 8px 0; font-size: 0.85em;
+                display: block; overflow-x: auto; max-width: 100%; }
+.bubble th, .bubble td { border: 1px solid #d8d8e0; padding: 5px 10px; text-align: left; }
+.bubble th { background: #f0f0f6; font-weight: 600; }
+.bubble tr:nth-child(even) td { background: #fafaff; }
+.bubble blockquote { border-left: 3px solid #d0d0e0; padding-left: 10px;
+                     color: #666; margin: 6px 0; }
+.bubble a { color: #5c5cff; }
+/* Mermaid diagrams */
+.bubble .mermaid { background: #fbfbfe; border: 1px solid #ececf4; border-radius: 8px;
+                   padding: 10px; margin: 8px 0; text-align: center; overflow-x: auto; }
+.bubble .mermaid svg { max-width: 100%; height: auto; }
+.bubble .mermaid-error { background: #fff3cd; border: 1px solid #ffc107; color: #856404;
+                         border-radius: 6px; padding: 8px 10px; margin: 8px 0;
+                         font-size: 0.8rem; white-space: pre-wrap; }
 
 /* ── Steps ── */
 .steps-group { align-self: flex-start; max-width: 92%; margin: 2px 0; }
@@ -614,6 +631,10 @@ body.resizing iframe { pointer-events: none; }
 
 <script>
 if (typeof marked !== 'undefined') marked.setOptions({ breaks: true, gfm: true });
+if (typeof mermaid !== 'undefined') {
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+}
+let _mermaidSeq = 0;
 
 // ── Global state ──────────────────────────────────────────────────────────
 let ws = null;
@@ -1587,6 +1608,39 @@ function renderMarkdown(md) {
   return marked.parse(md || '');
 }
 
+// Post-process a rendered bubble: render mermaid diagrams + highlight code.
+function enhanceBubble(bubbleEl) {
+  if (!bubbleEl) return;
+  // 1) Mermaid: ```mermaid blocks → rendered SVG
+  var mermaidBlocks = bubbleEl.querySelectorAll('pre > code.language-mermaid');
+  mermaidBlocks.forEach(function (code) {
+    var pre = code.parentElement;
+    var src = code.textContent || '';
+    var holder = document.createElement('div');
+    holder.className = 'mermaid';
+    pre.replaceWith(holder);
+    if (typeof mermaid === 'undefined') { holder.textContent = src; return; }
+    var id = 'mmd-' + (++_mermaidSeq);
+    try {
+      mermaid.render(id, src).then(function (res) {
+        holder.innerHTML = res.svg;
+      }).catch(function (e) {
+        holder.className = 'mermaid-error';
+        holder.textContent = '图表渲染失败：' + (e && e.message ? e.message : e) + '\n\n' + src;
+      });
+    } catch (e) {
+      holder.className = 'mermaid-error';
+      holder.textContent = '图表渲染失败：' + (e && e.message ? e.message : e) + '\n\n' + src;
+    }
+  });
+  // 2) Syntax-highlight remaining code blocks
+  if (typeof hljs !== 'undefined') {
+    bubbleEl.querySelectorAll('pre > code:not(.language-mermaid)').forEach(function (code) {
+      try { hljs.highlightElement(code); } catch (_) {}
+    });
+  }
+}
+
 function appendUser(text, isHistory) {
   var el = document.createElement('div');
   el.className = 'msg user';
@@ -1606,6 +1660,7 @@ function appendBot(text, isHistory) {
     '<div class="avatar">🐕</div>' +
     '<div class="bubble">' + renderMarkdown(text) + '</div>';
   chat.appendChild(el);
+  enhanceBubble(el.querySelector('.bubble'));
   if (!isHistory) scrollBottom();
 }
 
@@ -1616,6 +1671,7 @@ function appendPush(text) {
     '<div class="avatar">🔔</div>' +
     '<div class="bubble"><strong>系统通知</strong><br>' + renderMarkdown(text) + '</div>';
   chat.appendChild(el);
+  enhanceBubble(el.querySelector('.bubble'));
   scrollBottom();
 }
 
