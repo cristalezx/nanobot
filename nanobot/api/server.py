@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -57,6 +58,10 @@ class FileSaveRequest(BaseModel):
     content: str
 
 
+class ShareRequest(BaseModel):
+    session_id: str
+
+
 def create_app(
     agent: AgentLoop,
     bus: MessageBus,
@@ -69,6 +74,24 @@ def create_app(
 
     manager = ConnectionManager()
     _tokens: set[str] = set()  # active session tokens (in-memory)
+
+    # Read-only share links: share_id -> session_id, persisted to workspace.
+    _shares_path = agent.context.workspace.resolve() / ".perrobot_shares.json"
+
+    def _load_shares() -> dict[str, str]:
+        try:
+            return json.loads(_shares_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _save_shares(shares: dict[str, str]) -> None:
+        try:
+            _shares_path.write_text(json.dumps(shares), encoding="utf-8")
+        except OSError as e:
+            logger.warning("Failed to persist share links: {}", e)
+
+    def _session_for_share(share_id: str) -> str | None:
+        return _load_shares().get(share_id)
 
     def _check_token(request: Request) -> None:
         """Raise 401 if password is set and request carries no valid token."""
@@ -254,6 +277,58 @@ def create_app(
             media_type="text/markdown",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+
+    # ------------------------------------------------------------------ Sharing
+    # Note: kept under /v1/share (not /v1/sessions/{id:path}/share) so the
+    # greedy {session_id:path} on the clear-session route can't capture it.
+    @app.post("/v1/share")
+    async def create_share(request: Request, body: ShareRequest):
+        """Create (or reuse) a read-only share link for a session."""
+        _check_token(request)
+        session_id = body.session_id
+        shares = _load_shares()
+        # Reuse an existing share for this session if present
+        for sid, target in shares.items():
+            if target == session_id:
+                return {"share_id": sid, "url": f"/share/{sid}"}
+        share_id = secrets.token_urlsafe(16)
+        shares[share_id] = session_id
+        _save_shares(shares)
+        return {"share_id": share_id, "url": f"/share/{share_id}"}
+
+    @app.delete("/v1/share/{share_id}")
+    async def revoke_share(share_id: str, request: Request):
+        """Revoke a share link by its id."""
+        _check_token(request)
+        shares = _load_shares()
+        existed = share_id in shares
+        shares.pop(share_id, None)
+        _save_shares(shares)
+        return {"ok": True, "revoked": existed}
+
+    @app.get("/share/{share_id}")
+    async def serve_share_page(share_id: str):
+        """Serve the read-only share viewer page (no auth)."""
+        html = ui_path / "share.html"
+        if html.exists():
+            return FileResponse(html)
+        return JSONResponse({"error": "Share viewer not found"}, status_code=404)
+
+    @app.get("/v1/share/{share_id}/data")
+    async def share_data(share_id: str):
+        """Return a shared session's messages (no auth — share_id is the secret)."""
+        session_id = _session_for_share(share_id)
+        if not session_id:
+            raise HTTPException(status_code=404, detail="Share not found or revoked")
+        session = agent.sessions.get_or_create(session_id)
+        history = []
+        for m in session.messages:
+            role = m.get("role")
+            content = m.get("content", "")
+            if role in ("user", "assistant") and content and isinstance(content, str):
+                history.append({"role": role, "content": content})
+        title = session_id.split(":", 1)[-1] if ":" in session_id else session_id
+        return {"title": title, "messages": history}
 
     # ------------------------------------------------------------------ Files
     @app.get("/v1/files")

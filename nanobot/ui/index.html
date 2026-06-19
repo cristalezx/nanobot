@@ -163,6 +163,7 @@ body.resizing iframe { pointer-events: none; }
 }
 .session-action-btn:hover { color: #e74c3c; background: rgba(231,76,60,.15); }
 .session-action-btn.export:hover { color: #27ae60; background: rgba(39,174,96,.15); }
+.session-action-btn.share:hover { color: #5c5cff; background: rgba(92,92,255,.15); }
 
 /* ── Files Panel ── */
 #files-toolbar {
@@ -898,6 +899,7 @@ function renderSessionList(sessions) {
         '<span class="session-time">' + updatedAt + '</span>' +
       '</div>' +
       '<div class="session-item-actions">' +
+        '<button class="session-action-btn share" title="生成只读分享链接" onclick="shareSession(\'' + escapeHtml(sid) + '\', event)">🔗</button>' +
         '<button class="session-action-btn export" title="导出为 Markdown" onclick="exportSession(\'' + escapeHtml(sid) + '\', event)">↓</button>' +
         '<button class="session-action-btn" title="删除会话" onclick="deleteSession(\'' + escapeHtml(sid) + '\', event)">✕</button>' +
       '</div>';
@@ -938,6 +940,33 @@ async function deleteSession(sid, e) {
     switchSession('default');
   }
   loadSessionList();
+}
+
+async function shareSession(sid, e) {
+  e.stopPropagation();
+  try {
+    var res = await apiFetch('/v1/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: 'web:' + sid }),
+    });
+    if (!res.ok) { alert('生成分享链接失败'); return; }
+    var data = await res.json();
+    var fullUrl = location.origin + data.url;
+    var copied = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(fullUrl);
+        copied = true;
+      }
+    } catch (_) {}
+    window.prompt(
+      copied ? '只读分享链接已复制到剪贴板：' : '只读分享链接（手动复制）：',
+      fullUrl
+    );
+  } catch (err) {
+    alert('生成分享链接失败：' + (err && err.message ? err.message : err));
+  }
 }
 
 async function exportSession(sid, e) {

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>perrobot 🐕 · 分享</title>
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/highlight.min.js"></script>
+<script src="/vendor/mermaid.min.js"></script>
+<link rel="stylesheet" href="/vendor/github.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+       background: #f5f5f5; color: #222; }
+header { background: #1a1a2e; color: #fff; padding: 14px 20px;
+         display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 5; }
+header .logo { font-size: 1.3rem; }
+header h1 { font-size: 1rem; font-weight: 600; }
+header .badge { margin-left: auto; font-size: 0.72rem; background: #3a3a5a;
+                padding: 3px 10px; border-radius: 20px; color: #cfcfe8; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 20px 16px 60px; display: flex;
+        flex-direction: column; gap: 14px; }
+.msg { display: flex; gap: 8px; max-width: 90%; }
+.msg.user { flex-direction: row-reverse; align-self: flex-end; }
+.msg.bot { align-self: flex-start; }
+.avatar { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+          display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+.msg.user .avatar { background: #5c5cff; }
+.msg.bot .avatar { background: #e8e8e8; }
+.bubble { padding: 10px 14px; border-radius: 14px; line-height: 1.5;
+          font-size: 0.9rem; word-break: break-word; }
+.msg.user .bubble { background: #5c5cff; color: #fff; border-bottom-right-radius: 4px; }
+.msg.bot .bubble { background: #fff; border-bottom-left-radius: 4px;
+                   box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.bubble pre { background: #f6f8fa; border-radius: 6px; padding: 10px; overflow-x: auto; margin: 6px 0; }
+.bubble code { font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.85em; }
+.bubble p { margin-bottom: 6px; }
+.bubble p:last-child { margin-bottom: 0; }
+.bubble ul, .bubble ol { padding-left: 18px; margin-bottom: 6px; }
+.bubble h1, .bubble h2, .bubble h3 { margin: 8px 0 4px; }
+.msg.user .bubble pre { background: #4444cc; }
+.msg.user .bubble code { color: #ffe; }
+.bubble table { border-collapse: collapse; margin: 8px 0; font-size: 0.85em;
+                display: block; overflow-x: auto; max-width: 100%; }
+.bubble th, .bubble td { border: 1px solid #d8d8e0; padding: 5px 10px; text-align: left; }
+.bubble th { background: #f0f0f6; font-weight: 600; }
+.bubble tr:nth-child(even) td { background: #fafaff; }
+.bubble blockquote { border-left: 3px solid #d0d0e0; padding-left: 10px; color: #666; margin: 6px 0; }
+.bubble a { color: #5c5cff; }
+.bubble .mermaid { background: #fbfbfe; border: 1px solid #ececf4; border-radius: 8px;
+                   padding: 10px; margin: 8px 0; text-align: center; overflow-x: auto; }
+.bubble .mermaid svg { max-width: 100%; height: auto; }
+.bubble .mermaid-error { background: #fff3cd; border: 1px solid #ffc107; color: #856404;
+                         border-radius: 6px; padding: 8px 10px; margin: 8px 0;
+                         font-size: 0.8rem; white-space: pre-wrap; }
+.notice { text-align: center; color: #888; padding: 60px 20px; font-size: 0.9rem; }
+.footer { text-align: center; color: #aaa; font-size: 0.72rem; padding: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">🐕</span>
+  <h1 id="title">perrobot 分享</h1>
+  <span class="badge">只读</span>
+</header>
+<div class="wrap" id="wrap">
+  <div class="notice" id="notice">加载中…</div>
+</div>
+<div class="footer">由 perrobot 生成 · 只读分享</div>
+<script>
+if (typeof marked !== 'undefined') marked.setOptions({ breaks: true, gfm: true });
+if (typeof mermaid !== 'undefined') {
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+}
+let _mermaidSeq = 0;
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function renderMarkdown(md) {
+  if (typeof marked === 'undefined') return escapeHtml(md || '');
+  return marked.parse(md || '');
+}
+function enhanceBubble(bubbleEl) {
+  if (!bubbleEl) return;
+  bubbleEl.querySelectorAll('pre > code.language-mermaid').forEach(function (code) {
+    var pre = code.parentElement;
+    var src = code.textContent || '';
+    var holder = document.createElement('div');
+    holder.className = 'mermaid';
+    pre.replaceWith(holder);
+    if (typeof mermaid === 'undefined') { holder.textContent = src; return; }
+    var id = 'mmd-' + (++_mermaidSeq);
+    try {
+      mermaid.render(id, src).then(function (res) { holder.innerHTML = res.svg; })
+        .catch(function (e) { holder.className = 'mermaid-error';
+          holder.textContent = '图表渲染失败：' + (e && e.message ? e.message : e) + '\n\n' + src; });
+    } catch (e) {
+      holder.className = 'mermaid-error';
+      holder.textContent = '图表渲染失败：' + (e && e.message ? e.message : e) + '\n\n' + src;
+    }
+  });
+  if (typeof hljs !== 'undefined') {
+    bubbleEl.querySelectorAll('pre > code:not(.language-mermaid)').forEach(function (code) {
+      try { hljs.highlightElement(code); } catch (_) {}
+    });
+  }
+}
+
+function shareId() {
+  var parts = location.pathname.split('/').filter(Boolean);
+  return parts[parts.length - 1] || '';
+}
+
+async function load() {
+  var wrap = document.getElementById('wrap');
+  var notice = document.getElementById('notice');
+  try {
+    var res = await fetch('/v1/share/' + encodeURIComponent(shareId()) + '/data');
+    if (!res.ok) {
+      notice.textContent = res.status === 404 ? '该分享链接不存在或已被撤销。' : '加载失败。';
+      return;
+    }
+    var data = await res.json();
+    document.getElementById('title').textContent = 'perrobot · ' + (data.title || '会话');
+    notice.remove();
+    if (!data.messages || !data.messages.length) {
+      wrap.innerHTML = '<div class="notice">这个会话还没有内容。</div>';
+      return;
+    }
+    data.messages.forEach(function (m) {
+      var el = document.createElement('div');
+      el.className = 'msg ' + (m.role === 'user' ? 'user' : 'bot');
+      if (m.role === 'user') {
+        el.innerHTML = '<div class="avatar">👤</div><div class="bubble">' +
+          escapeHtml(m.content).replace(/\n/g, '<br>') + '</div>';
+        wrap.appendChild(el);
+      } else {
+        el.innerHTML = '<div class="avatar">🐕</div><div class="bubble">' +
+          renderMarkdown(m.content) + '</div>';
+        wrap.appendChild(el);
+        enhanceBubble(el.querySelector('.bubble'));
+      }
+    });
+  } catch (e) {
+    notice.textContent = '加载失败：' + (e && e.message ? e.message : e);
+  }
+}
+load();
+</script>
+</body>
+</html>
