@@ -52,6 +52,12 @@ header {
 }
 header h1 { font-size: 1.1rem; white-space: nowrap; }
 .header-spacer { flex: 1; }
+#model-select {
+  background: #2a2a4e; border: 1px solid #4a4a8e; color: #ccc;
+  border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; cursor: pointer;
+  max-width: 130px;
+}
+#model-select:focus { outline: none; border-color: #7c7cff; }
 #session-input {
   background: #2a2a4e; border: 1px solid #4a4a8e; color: #ccc;
   border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; width: 140px;
@@ -536,6 +542,7 @@ body.resizing iframe { pointer-events: none; }
   <div id="status-dot" title="WebSocket 状态"></div>
   <h1>🐕 perrobot</h1>
   <div class="header-spacer"></div>
+  <select id="model-select" onchange="switchModel()" title="切换模型" style="display:none"></select>
   <input id="session-input" type="text" value="default" placeholder="新会话 ID" title="输入新会话 ID">
   <button class="btn" onclick="createAndSwitch()">新建会话</button>
   <button class="btn" onclick="triggerHeartbeat()" title="立即触发一次心跳">心跳</button>
@@ -837,7 +844,50 @@ document.getElementById('auth-password').addEventListener('keydown', function(e)
 
 function init() {
   loadSessionList();
+  loadModels();
   loadHistory(currentSessionId).then(function() { connect(); });
+}
+
+// ── Model switching ────────────────────────────────────────────────────────
+async function loadModels() {
+  try {
+    var res = await apiFetch('/v1/models');
+    if (!res.ok) return;
+    var data = await res.json();
+    if (!data.models || !data.models.length) return;
+    var sel = document.getElementById('model-select');
+    sel.innerHTML = '';
+    data.models.forEach(function(m) {
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label;
+      if (m.id === data.current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.style.display = '';
+  } catch (_) {}
+}
+
+async function switchModel() {
+  var sel = document.getElementById('model-select');
+  var model = sel.value;
+  if (!model) return;
+  try {
+    var res = await apiFetch('/v1/model', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model }),
+    });
+    if (res.ok) {
+      appendSystem('模型已切换为：' + model);
+    } else {
+      appendSystem('模型切换失败');
+      loadModels();
+    }
+  } catch (e) {
+    appendSystem('模型切换失败：' + (e && e.message ? e.message : e));
+    loadModels();
+  }
 }
 
 // ── Sidebar tabs ───────────────────────────────────────────────────────────

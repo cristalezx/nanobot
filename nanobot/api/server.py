@@ -62,6 +62,10 @@ class ShareRequest(BaseModel):
     session_id: str
 
 
+class ModelSwitchRequest(BaseModel):
+    model: str
+
+
 def create_app(
     agent: AgentLoop,
     bus: MessageBus,
@@ -334,6 +338,34 @@ def create_app(
                 history.append({"role": role, "content": content})
         title = session_id.split(":", 1)[-1] if ":" in session_id else session_id
         return {"title": title, "messages": history}
+
+    # ------------------------------------------------------------------ Models
+    @app.get("/v1/models")
+    async def list_models(request: Request):
+        """Return available models from config (no secrets)."""
+        _check_token(request)
+        try:
+            from nanobot.providers.custom_provider import load_models_config
+            cfg = load_models_config()
+        except Exception:
+            cfg = {}
+        models_raw = cfg.get("models", {})
+        current = getattr(agent.provider, "default_model", cfg.get("default_model", ""))
+        models = [
+            {"id": mid, "label": entry.get("label", mid)}
+            for mid, entry in models_raw.items()
+        ]
+        return {"models": models, "current": current}
+
+    @app.post("/v1/model")
+    async def switch_model(request: Request, body: ModelSwitchRequest):
+        """Hot-switch the LLM model on the running agent provider."""
+        _check_token(request)
+        provider = agent.provider
+        if not hasattr(provider, "switch_model"):
+            raise HTTPException(status_code=400, detail="Provider does not support model switching")
+        provider.switch_model(body.model)
+        return {"ok": True, "model": body.model}
 
     # ------------------------------------------------------------------ Files
     @app.get("/v1/files")

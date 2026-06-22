@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import uuid
+from pathlib import Path
 from typing import Any
 
 import json_repair
@@ -17,35 +19,80 @@ try:
 except ImportError:
     _get_token = None  # type: ignore[assignment]
 
+_MODELS_DIR = Path(__file__).parent
+
+
+def load_models_config() -> dict:
+    """Load llm_models.json, merged with llm_models.local.json if present."""
+    base = _MODELS_DIR / "llm_models.json"
+    local = _MODELS_DIR / "llm_models.local.json"
+    cfg: dict = {}
+    if base.exists():
+        cfg = json.loads(base.read_text(encoding="utf-8"))
+    if local.exists():
+        loc = json.loads(local.read_text(encoding="utf-8"))
+        # Deep-merge: local overrides per-model fields (ak/sk etc.)
+        for model, overrides in loc.get("models", {}).items():
+            cfg.setdefault("models", {}).setdefault(model, {}).update(overrides)
+        for key in ("base_url", "default_model"):
+            if key in loc:
+                cfg[key] = loc[key]
+    return cfg
+
 
 class CustomProvider(LLMProvider):
 
     def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1",
                  default_model: str = "default", scene_map: dict[str, str] | None = None):
+        # Load from llm_models.json (merged with .local.json) if available.
+        models_cfg = load_models_config()
+        if models_cfg:
+            api_base = models_cfg.get("base_url", api_base)
+            default_model = models_cfg.get("default_model", default_model)
+
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        self._scene_map = scene_map or {}
+        self._models_cfg = models_cfg  # full config, used for model switching
 
-        # If a custom signing transport is available (llm_utils.get_token),
-        # use the async http client it returns so every request is signed.
-        # scene_map keys are model names, values are scene_ids.
+        self._client = self._make_client(default_model)
+
+    def _model_entry(self, model: str) -> dict:
+        return self._models_cfg.get("models", {}).get(model, {})
+
+    def _make_client(self, model: str) -> AsyncOpenAI:
+        """Build an AsyncOpenAI client signed for the given model."""
+        entry = self._model_entry(model)
+        base_url = self._models_cfg.get("base_url", self.api_base) if self._models_cfg else self.api_base
+        ak = entry.get("ak") or self.api_key
+        scene_id = entry.get("scene_id")
+
         http_client = None
         if _get_token is not None:
             try:
-                scene_id = self._scene_map.get(default_model)
-                _sync_client, http_client = _get_token(base_url=api_base, scene_id=scene_id)
+                _sync, http_client = _get_token(base_url=base_url, scene_id=scene_id, ak=ak,
+                                                 sk=entry.get("sk", ""))
+            except TypeError:
+                # llm_utils.get_token may not accept all kwargs yet; fall back gracefully
+                try:
+                    _sync, http_client = _get_token(base_url=base_url, scene_id=scene_id)
+                except Exception:
+                    http_client = None
             except Exception:
                 http_client = None
 
         client_kwargs: dict[str, Any] = {
-            "api_key": api_key,
-            "base_url": api_base,
+            "api_key": ak or "no-key",
+            "base_url": base_url,
             "default_headers": {"x-session-affinity": uuid.uuid4().hex},
         }
         if http_client is not None:
             client_kwargs["http_client"] = http_client
+        return AsyncOpenAI(**client_kwargs)
 
-        self._client = AsyncOpenAI(**client_kwargs)
+    def switch_model(self, model: str) -> None:
+        """Hot-switch to a different model, rebuilding the signed client."""
+        self.default_model = model
+        self._client = self._make_client(model)
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,

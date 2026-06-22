@@ -22,3 +22,6 @@ poetry.lock
 botpy.log
 
 .claude/
+
+# Internal LLM credentials — keep out of git
+nanobot/providers/llm_models.local.json
