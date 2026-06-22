@@ -20,17 +20,20 @@ except ImportError:
 
 class CustomProvider(LLMProvider):
 
-    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
+    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1",
+                 default_model: str = "default", scene_map: dict[str, str] | None = None):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self._scene_map = scene_map or {}
 
         # If a custom signing transport is available (llm_utils.get_token),
         # use the async http client it returns so every request is signed.
-        # Otherwise fall back to a plain AsyncOpenAI client.
+        # scene_map keys are model names, values are scene_ids.
         http_client = None
         if _get_token is not None:
             try:
-                _sync_client, http_client = _get_token(base_url=api_base)
+                scene_id = self._scene_map.get(default_model)
+                _sync_client, http_client = _get_token(base_url=api_base, scene_id=scene_id)
             except Exception:
                 http_client = None
 
