@@ -30,7 +30,7 @@ class CustomProvider(LLMProvider):
         http_client = None
         if _get_token is not None:
             try:
-                _sync_client, http_client = _get_token()
+                _sync_client, http_client = _get_token(base_url=api_base)
             except Exception:
                 http_client = None
 
