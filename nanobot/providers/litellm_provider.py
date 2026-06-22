@@ -368,7 +368,7 @@ class LiteLLMProvider(LLMProvider):
                 continue
             args = slot["args"]
             args = json_repair.loads(args) if isinstance(args, str) and args.strip() else {}
-            tool_calls.append(ToolCallRequest(id=_short_tool_id(), name=slot["name"], arguments=args))
+            tool_calls.append(ToolCallRequest(id=slot["id"] or _short_tool_id(), name=slot["name"], arguments=args))
             finish_reason = "tool_calls"
 
         yield ("final", LLMResponse(

@@ -68,7 +68,30 @@ header .badge { margin-left: auto; font-size: 0.72rem; background: #3a3a5a;
 </div>
 <div class="footer">由 perrobot 生成 · 只读分享</div>
 <script>
-if (typeof marked !== 'undefined') marked.setOptions({ breaks: true, gfm: true });
+if (typeof marked !== 'undefined') {
+  marked.setOptions({ breaks: true, gfm: true });
+  // Sanitize HTML output to prevent XSS: strip script tags, event handlers,
+  // and dangerous protocols. This page is publicly accessible without auth.
+  var _renderer = new marked.Renderer();
+  var _origLink = _renderer.link.bind(_renderer);
+  _renderer.link = function(href, title, text) {
+    if (href && /^javascript:/i.test(href.trim())) href = '#';
+    return _origLink(href, title, text);
+  };
+  marked.use({
+    renderer: _renderer,
+    hooks: {
+      postprocess: function(html) {
+        // Strip script/style tags and on* event attributes
+        return html
+          .replace(/<script[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[\s\S]*?<\/style>/gi, '')
+          .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
+          .replace(/\s+src\s*=\s*(?:"javascript:[^"]*"|'javascript:[^']*')/gi, '');
+      }
+    }
+  });
+}
 if (typeof mermaid !== 'undefined') {
   mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
 }

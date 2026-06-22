@@ -75,23 +75,26 @@ def create_app(
     manager = ConnectionManager()
     _tokens: set[str] = set()  # active session tokens (in-memory)
 
-    # Read-only share links: share_id -> session_id, persisted to workspace.
+    # Read-only share links: share_id -> session_id.
+    # Held in memory for O(1) concurrent reads; persisted to disk for restarts.
     _shares_path = agent.context.workspace.resolve() / ".perrobot_shares.json"
+    _shares_lock = asyncio.Lock()
+    try:
+        _shares: dict[str, str] = json.loads(_shares_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        _shares = {}
 
-    def _load_shares() -> dict[str, str]:
+    async def _persist_shares() -> bool:
+        """Write in-memory shares to disk. Returns False on failure."""
         try:
-            return json.loads(_shares_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-
-    def _save_shares(shares: dict[str, str]) -> None:
-        try:
-            _shares_path.write_text(json.dumps(shares), encoding="utf-8")
+            _shares_path.write_text(json.dumps(_shares), encoding="utf-8")
+            return True
         except OSError as e:
             logger.warning("Failed to persist share links: {}", e)
+            return False
 
     def _session_for_share(share_id: str) -> str | None:
-        return _load_shares().get(share_id)
+        return _shares.get(share_id)
 
     def _check_token(request: Request) -> None:
         """Raise 401 if password is set and request carries no valid token."""
@@ -286,24 +289,26 @@ def create_app(
         """Create (or reuse) a read-only share link for a session."""
         _check_token(request)
         session_id = body.session_id
-        shares = _load_shares()
-        # Reuse an existing share for this session if present
-        for sid, target in shares.items():
-            if target == session_id:
-                return {"share_id": sid, "url": f"/share/{sid}"}
-        share_id = secrets.token_urlsafe(16)
-        shares[share_id] = session_id
-        _save_shares(shares)
+        async with _shares_lock:
+            for sid, target in _shares.items():
+                if target == session_id:
+                    return {"share_id": sid, "url": f"/share/{sid}"}
+            share_id = secrets.token_urlsafe(16)
+            _shares[share_id] = session_id
+            if not await _persist_shares():
+                # Roll back in-memory state so the returned id is always valid
+                _shares.pop(share_id, None)
+                raise HTTPException(status_code=500, detail="Failed to persist share link")
         return {"share_id": share_id, "url": f"/share/{share_id}"}
 
     @app.delete("/v1/share/{share_id}")
     async def revoke_share(share_id: str, request: Request):
         """Revoke a share link by its id."""
         _check_token(request)
-        shares = _load_shares()
-        existed = share_id in shares
-        shares.pop(share_id, None)
-        _save_shares(shares)
+        async with _shares_lock:
+            existed = share_id in _shares
+            _shares.pop(share_id, None)
+            await _persist_shares()
         return {"ok": True, "revoked": existed}
 
     @app.get("/share/{share_id}")
@@ -539,10 +544,13 @@ def create_app(
                     await ws.send_json({"type": msg_type, "content": text})
 
                 async def on_token(kind: str, text: str) -> None:
-                    if kind == "delta":
-                        await ws.send_json({"type": "token", "content": text})
-                    elif kind == "cancel":
-                        await ws.send_json({"type": "token_cancel"})
+                    try:
+                        if kind == "delta":
+                            await ws.send_json({"type": "token", "content": text})
+                        elif kind == "cancel":
+                            await ws.send_json({"type": "token_cancel"})
+                    except Exception:
+                        pass  # client disconnected mid-stream; agent loop continues to completion
 
                 msg = InboundMessage(
                     channel=channel,
