@@ -10,18 +10,39 @@ from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
+# Optional: if llm_utils.py is present in this package (e.g. internal deployment
+# with custom RSA request signing), use its async http client automatically.
+try:
+    from nanobot.providers.llm_utils import get_token as _get_token
+except ImportError:
+    _get_token = None  # type: ignore[assignment]
+
 
 class CustomProvider(LLMProvider):
 
     def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        # Keep affinity stable for this provider instance to improve backend cache locality.
-        self._client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=api_base,
-            default_headers={"x-session-affinity": uuid.uuid4().hex},
-        )
+
+        # If a custom signing transport is available (llm_utils.get_token),
+        # use the async http client it returns so every request is signed.
+        # Otherwise fall back to a plain AsyncOpenAI client.
+        http_client = None
+        if _get_token is not None:
+            try:
+                _sync_client, http_client = _get_token()
+            except Exception:
+                http_client = None
+
+        client_kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            "base_url": api_base,
+            "default_headers": {"x-session-affinity": uuid.uuid4().hex},
+        }
+        if http_client is not None:
+            client_kwargs["http_client"] = http_client
+
+        self._client = AsyncOpenAI(**client_kwargs)
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
