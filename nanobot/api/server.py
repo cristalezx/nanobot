@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import secrets
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -74,6 +76,14 @@ class ShareRequest(BaseModel):
 
 class ModelSwitchRequest(BaseModel):
     model: str
+
+
+class SkillSaveRequest(BaseModel):
+    content: str
+
+
+# Skill names map to directory names — restrict to a safe character set.
+_SKILL_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def create_app(
@@ -376,6 +386,70 @@ def create_app(
             raise HTTPException(status_code=400, detail="Provider does not support model switching")
         provider.switch_model(body.model)
         return {"ok": True, "model": body.model}
+
+    # ------------------------------------------------------------------ Skills
+    @app.get("/v1/skills")
+    async def list_skills_api(request: Request):
+        """List all skills (builtin + workspace) with source and availability."""
+        _check_token(request)
+        loader = agent.context.skills
+        always = set(loader.get_always_skills())
+        out = []
+        for s in loader.list_skills(filter_unavailable=False):
+            name = s["name"]
+            meta = loader._get_skill_meta(name)
+            available = loader._check_requirements(meta)
+            out.append({
+                "name": name,
+                "description": loader._get_skill_description(name),
+                "source": s["source"],
+                "available": available,
+                "requires": "" if available else loader._get_missing_requirements(meta),
+                "always": name in always,
+            })
+        out.sort(key=lambda x: (x["source"] != "workspace", x["name"].lower()))
+        return {"skills": out}
+
+    @app.get("/v1/skills/{name}")
+    async def get_skill_api(name: str, request: Request):
+        """Return a skill's raw SKILL.md content and whether it is editable."""
+        _check_token(request)
+        if not _SKILL_NAME_RE.match(name):
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+        loader = agent.context.skills
+        content = loader.load_skill(name)
+        if content is None:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        # A workspace copy (if present) shadows the builtin and is editable.
+        ws_md = loader.workspace_skills / name / "SKILL.md"
+        source = "workspace" if ws_md.exists() else "builtin"
+        return {"name": name, "content": content, "source": source,
+                "editable": source == "workspace"}
+
+    @app.put("/v1/skills/{name}")
+    async def save_skill_api(name: str, request: Request, body: SkillSaveRequest):
+        """Create or update a workspace skill (writes workspace/skills/<name>/SKILL.md)."""
+        _check_token(request)
+        if not _SKILL_NAME_RE.match(name):
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+        loader = agent.context.skills
+        skill_dir = loader.workspace_skills / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(body.content, encoding="utf-8")
+        return {"ok": True, "name": name, "source": "workspace"}
+
+    @app.delete("/v1/skills/{name}")
+    async def delete_skill_api(name: str, request: Request):
+        """Delete a workspace skill. Builtin skills cannot be deleted."""
+        _check_token(request)
+        if not _SKILL_NAME_RE.match(name):
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+        loader = agent.context.skills
+        skill_dir = loader.workspace_skills / name
+        if not (skill_dir / "SKILL.md").exists():
+            raise HTTPException(status_code=404, detail="No workspace skill to delete")
+        shutil.rmtree(skill_dir)
+        return {"ok": True, "name": name}
 
     # ------------------------------------------------------------------ Files
     @app.get("/v1/files")
