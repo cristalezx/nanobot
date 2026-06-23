@@ -8,7 +8,17 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -428,6 +438,65 @@ def create_app(
         encoded = body.content.encode("utf-8")
         target.write_bytes(encoded)
         return {"ok": True, "bytes": len(encoded)}
+
+    @app.post("/v1/files/upload")
+    async def upload_file(
+        request: Request,
+        file: UploadFile = File(...),
+        path: str = Form(""),
+    ):
+        """Upload a (binary) file into the workspace.
+
+        `path` is the target *directory* (relative to workspace, or absolute when
+        allow_host_paths). The uploaded filename is appended to it. Returns the
+        saved path so the UI can reference it in a chat message.
+        """
+        _check_token(request)
+
+        # Sanitize the client-supplied filename — strip any directory components.
+        raw_name = file.filename or "upload"
+        name = Path(raw_name).name or "upload"
+
+        target_dir = _resolve_path(path) if path else agent.context.workspace.resolve()
+        if target_dir.exists() and target_dir.is_file():
+            raise HTTPException(status_code=400, detail="Target path is a file, not a directory")
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        target = (target_dir / name).resolve()
+        # Re-validate the final path stays within the allowed subtree.
+        workspace = agent.context.workspace.resolve()
+        if not allow_host_paths:
+            try:
+                target.relative_to(workspace)
+            except ValueError:
+                raise HTTPException(status_code=403, detail="Path outside workspace")
+
+        # Avoid clobbering an existing file: suffix with -1, -2, ...
+        if target.exists():
+            stem, suffix = target.stem, target.suffix
+            i = 1
+            while True:
+                candidate = target.with_name(f"{stem}-{i}{suffix}")
+                if not candidate.exists():
+                    target = candidate
+                    break
+                i += 1
+
+        size = 0
+        with target.open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                size += len(chunk)
+        await file.close()
+
+        try:
+            rel = str(target.relative_to(workspace))
+        except ValueError:
+            rel = str(target)
+        return {"ok": True, "path": rel, "name": target.name, "bytes": size}
 
     @app.get("/v1/files/download")
     async def download_file(request: Request, path: str = Query(...)):

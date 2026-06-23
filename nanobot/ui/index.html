@@ -199,6 +199,11 @@ body.resizing iframe { pointer-events: none; }
   padding: 2px 7px; font-size: 0.72rem; cursor: pointer;
 }
 #files-workspace-btn:hover { border-color: #5c5cff; color: #5c5cff; }
+#files-upload-btn {
+  background: none; border: 1px solid #3a3a6e; color: #888; border-radius: 4px;
+  padding: 2px 7px; font-size: 0.72rem; cursor: pointer;
+}
+#files-upload-btn:hover { border-color: #5c5cff; color: #5c5cff; }
 #files-breadcrumb {
   padding: 5px 10px; font-size: 0.73rem; color: #aaa;
   border-bottom: 1px solid #2a2a4e; flex-shrink: 0;
@@ -395,6 +400,12 @@ body.resizing iframe { pointer-events: none; }
 }
 #send-btn:hover { background: #4444dd; }
 #send-btn:disabled { background: #aaa; cursor: default; }
+#attach-btn {
+  background: none; border: none; cursor: pointer; font-size: 1.15rem;
+  align-self: flex-end; padding: 6px 4px; line-height: 1; opacity: 0.7;
+}
+#attach-btn:hover { opacity: 1; }
+#attach-btn:disabled { opacity: 0.3; cursor: default; }
 
 /* ── History divider ── */
 .history-divider {
@@ -574,8 +585,10 @@ body.resizing iframe { pointer-events: none; }
         <div id="files-path-bar">
           <input id="files-path-input" type="text" placeholder="路径…" title="输入路径后按 Enter 导航">
           <button id="files-workspace-btn" onclick="goWorkspace()" title="跳转到 workspace">[ws]</button>
+          <button id="files-upload-btn" onclick="document.getElementById('files-upload-input').click()" title="上传文件到当前目录">⤓</button>
           <button id="files-new-btn" onclick="newFile()" title="新建文件">+</button>
         </div>
+        <input id="files-upload-input" type="file" multiple style="display:none" onchange="uploadFilesToCurrentDir(this.files)">
         <div class="files-toolbar-row">
           <label>
             <input type="checkbox" id="files-hidden-toggle" onchange="loadFiles(currentFilePath)">
@@ -610,6 +623,8 @@ body.resizing iframe { pointer-events: none; }
   <div id="chat-panel">
     <div id="chat"></div>
     <div id="input-bar">
+      <button id="attach-btn" onclick="document.getElementById('chat-upload-input').click()" title="上传附件">📎</button>
+      <input id="chat-upload-input" type="file" multiple style="display:none" onchange="uploadChatAttachments(this.files)">
       <textarea id="msg-input" rows="1" placeholder="输入消息，Shift+Enter 换行，Enter 发送…"></textarea>
       <button id="send-btn" onclick="sendMessage()">发送</button>
     </div>
@@ -1165,6 +1180,60 @@ function newFile() {
   if (!name) return;
   var path = currentFilePath ? currentFilePath + '/' + name : name;
   openFileInEditor(path, '');
+}
+
+// Upload one file to a target directory via the multipart endpoint.
+// Returns the saved relative path, or null on failure.
+async function uploadOneFile(file, targetDir) {
+  var fd = new FormData();
+  fd.append('file', file);
+  fd.append('path', targetDir || '');
+  // Note: don't set Content-Type — the browser sets the multipart boundary.
+  var res = await apiFetch('/v1/files/upload', { method: 'POST', body: fd });
+  if (!res.ok) return null;
+  var data = await res.json();
+  return data.path || null;
+}
+
+// Sidebar: upload selected files into the directory currently being browsed.
+async function uploadFilesToCurrentDir(fileList) {
+  var files = Array.from(fileList || []);
+  if (!files.length) return;
+  appendSystem('上传中… (' + files.length + ' 个文件)');
+  var ok = 0;
+  for (var i = 0; i < files.length; i++) {
+    try {
+      var saved = await uploadOneFile(files[i], currentFilePath || '');
+      if (saved) ok++;
+    } catch (_) {}
+  }
+  document.getElementById('files-upload-input').value = '';
+  appendSystem('已上传 ' + ok + '/' + files.length + ' 个文件到 ' + (currentFilePath || 'workspace'));
+  loadFiles(currentFilePath || '');
+}
+
+// Chat: upload attachments into uploads/, then reference their paths in the input
+// so the agent knows where to read them.
+async function uploadChatAttachments(fileList) {
+  var files = Array.from(fileList || []);
+  if (!files.length) return;
+  var btn = document.getElementById('attach-btn');
+  btn.disabled = true;
+  var paths = [];
+  for (var i = 0; i < files.length; i++) {
+    try {
+      var saved = await uploadOneFile(files[i], 'uploads');
+      if (saved) paths.push(saved);
+    } catch (_) {}
+  }
+  document.getElementById('chat-upload-input').value = '';
+  btn.disabled = false;
+  if (!paths.length) { appendSystem('附件上传失败'); return; }
+  // Prepend a reference line to the message input.
+  var ref = '附件：' + paths.join('、') + '\n';
+  input.value = ref + input.value;
+  input.focus();
+  input.dispatchEvent(new Event('input'));
 }
 
 // ── Search ─────────────────────────────────────────────────────────────────
