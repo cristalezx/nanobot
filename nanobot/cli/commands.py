@@ -446,6 +446,7 @@ def serve(
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     password: str | None = typer.Option(None, "--password", help="Optional UI password"),
     allow_host_paths: bool = typer.Option(False, "--allow-host-paths", help="Allow browsing/editing any path on the host"),
+    users_file: str | None = typer.Option(None, "--users", help="Multi-user config YAML (enables per-user workspaces)"),
 ):
     """Start the nanobot web API server with chat UI."""
     try:
@@ -548,14 +549,72 @@ def serve(
         enabled=hb_cfg.enabled,
     )
 
+    # ── Multi-user mode ──────────────────────────────────────────────────────
+    user_agents_map: dict | None = None
+    extra_agents: list = []  # (agent, cron) pairs for startup/shutdown
+
+    if users_file:
+        try:
+            import yaml  # type: ignore[import]
+        except ImportError:
+            console.print("[red]PyYAML is required for --users: pip install pyyaml[/red]")
+            raise typer.Exit(1)
+
+        with open(users_file, encoding="utf-8") as f:
+            users_cfg = yaml.safe_load(f) or {}
+
+        user_agents_map = {}
+        for uname, ucfg in users_cfg.items():
+            uws = Path(ucfg.get("workspace", cfg.workspace_path / "users" / uname))
+            uws.mkdir(parents=True, exist_ok=True)
+            sync_workspace_templates(uws)
+            u_bus = MessageBus()
+            u_sm = SessionManager(uws)
+            u_cron_path = uws / "cron" / "jobs.json"
+            u_cron = CronService(u_cron_path)
+            u_agent = AgentLoop(
+                bus=u_bus,
+                provider=provider,
+                workspace=uws,
+                model=cfg.agents.defaults.model,
+                temperature=cfg.agents.defaults.temperature,
+                max_tokens=cfg.agents.defaults.max_tokens,
+                max_iterations=cfg.agents.defaults.max_tool_iterations,
+                memory_window=cfg.agents.defaults.memory_window,
+                reasoning_effort=cfg.agents.defaults.reasoning_effort,
+                brave_api_key=cfg.tools.web.search.api_key or None,
+                web_proxy=cfg.tools.web.proxy or None,
+                exec_config=cfg.tools.exec,
+                cron_service=u_cron,
+                restrict_to_workspace=cfg.tools.restrict_to_workspace,
+                session_manager=u_sm,
+                mcp_servers=cfg.tools.mcp_servers,
+            )
+            user_agents_map[uname] = {
+                "password": ucfg.get("password", ""),
+                "agent": u_agent,
+                "bus": u_bus,
+            }
+            extra_agents.append((u_agent, u_cron))
+            console.print(f"  [dim]user:[/dim] [cyan]{uname}[/cyan] → [dim]{uws}[/dim]")
+
     ui_path = Path(__file__).parent.parent / "ui"
-    fast_app = create_app(agent, bus, ui_path, heartbeat=heartbeat, password=password, allow_host_paths=allow_host_paths)
+    fast_app = create_app(
+        agent, bus, ui_path,
+        heartbeat=heartbeat,
+        password=password,
+        allow_host_paths=allow_host_paths,
+        user_agents=user_agents_map,
+    )
 
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
             await agent._connect_mcp()
+            for u_agent, u_cron in extra_agents:
+                await u_cron.start()
+                await u_agent._connect_mcp()
             server = uvicorn.Server(uvicorn.Config(
                 fast_app, host=host, port=port, log_level="warning"
             ))
@@ -566,6 +625,9 @@ def serve(
             heartbeat.stop()
             cron.stop()
             await agent.close_mcp()
+            for u_agent, u_cron in extra_agents:
+                u_cron.stop()
+                await u_agent.close_mcp()
 
     asyncio.run(run())
 

@@ -50,11 +50,12 @@ body {
 }
 #auth-box h2 { font-size: 1.2rem; color: var(--text); text-align: center; }
 #auth-box p { font-size: 0.85rem; color: #666; text-align: center; }
-#auth-password {
+#auth-username, #auth-password {
   border: 1px solid #ddd; border-radius: 8px; padding: 10px 14px;
   font-size: 0.95rem; outline: none; width: 100%;
 }
-#auth-password:focus { border-color: #5c5cff; }
+#auth-username:focus, #auth-password:focus { border-color: #5c5cff; }
+#auth-username.hidden { display: none; }
 #auth-submit {
   background: #5c5cff; color: #fff; border: none; border-radius: 8px;
   padding: 10px; font-size: 0.95rem; cursor: pointer; width: 100%;
@@ -401,12 +402,18 @@ body.resizing iframe { pointer-events: none; }
 .msg.user .bubble code { color: #fff; }
 .msg.user .bubble a { color: #fff; text-decoration: underline; }
 /* Live-streaming bubble: show raw text with a blinking caret */
-.bubble.streaming { white-space: pre-wrap; }
+.bubble.streaming { white-space: pre-wrap; position: relative; }
 .bubble.streaming::after {
   content: '▋'; color: var(--accent); margin-left: 1px;
   animation: caret-blink 1s steps(2, start) infinite;
 }
 @keyframes caret-blink { to { visibility: hidden; } }
+.stream-rate {
+  position: absolute; top: -18px; right: 0;
+  font-size: 0.7rem; color: var(--text-faint);
+  background: var(--surface); padding: 1px 5px; border-radius: 4px;
+  pointer-events: none; white-space: nowrap;
+}
 /* Tables rendered from markdown (GFM) */
 .bubble table { border-collapse: collapse; margin: 8px 0; font-size: 0.85em;
                 display: block; overflow-x: auto; max-width: 100%; }
@@ -679,7 +686,8 @@ body.resizing iframe { pointer-events: none; }
 <div id="auth-overlay" class="hidden">
   <div id="auth-box">
     <h2>🐕 perrobot</h2>
-    <p>请输入访问密码</p>
+    <p id="auth-hint">请输入访问密码</p>
+    <input id="auth-username" type="text" placeholder="用户名" autocomplete="username" class="hidden">
     <input id="auth-password" type="password" placeholder="密码" autocomplete="current-password">
     <div id="auth-error"></div>
     <button id="auth-submit" onclick="submitAuth()">进入</button>
@@ -720,6 +728,7 @@ body.resizing iframe { pointer-events: none; }
   <button id="toggle-sidebar" onclick="toggleSidebar()" title="切换侧边栏">☰</button>
   <div id="status-dot" title="WebSocket 状态"></div>
   <h1>🐕 perrobot</h1>
+  <span id="header-user" style="font-size:0.78rem;color:var(--text-faint);display:none;"></span>
   <div class="header-spacer"></div>
   <select id="model-select" onchange="switchModel()" title="切换模型" style="display:none"></select>
   <input id="session-input" type="text" value="default" placeholder="新会话 ID" title="输入新会话 ID">
@@ -840,6 +849,8 @@ let _mermaidSeq = 0;
 let currentSessionId = 'default';
 let activeSessionId  = 'default';
 let authToken = sessionStorage.getItem('nanobotToken') || '';
+let authUsername = sessionStorage.getItem('nanobotUser') || '';
+let _isMultiUser = false;
 
 // Per-session state lives in sesStore — see getSes().
 
@@ -860,6 +871,7 @@ function getSes(sid) {
     sesStore.set(sid, {
       ws: null, busy: false, unread: false, chatEl: el,
       typingEl: null, streamBubbleEl: null, streamBuffer: '',
+      streamRateEl: null, streamTokenCount: 0, streamStartTime: 0,
       currentStepsGroup: null, stepsCounter: 0,
       toolsUsed: [], skillsUsed: [], filesWrittenThisTurn: []
     });
@@ -980,6 +992,7 @@ async function boot() {
   try {
     var res = await fetch('/v1/auth/required');
     var data = await res.json();
+    _isMultiUser = !!data.multi_user;
     if (!data.required) {
       var r = await fetch('/v1/auth', {
         method: 'POST',
@@ -996,7 +1009,9 @@ async function boot() {
       var probe = await apiFetch('/v1/sessions');
       if (probe.ok) { init(); return; }
       authToken = '';
+      authUsername = '';
       sessionStorage.removeItem('nanobotToken');
+      sessionStorage.removeItem('nanobotUser');
     }
     showAuthModal();
   } catch (e) {
@@ -1006,40 +1021,76 @@ async function boot() {
 }
 
 function showAuthModal() {
+  var unEl = document.getElementById('auth-username');
+  var hint = document.getElementById('auth-hint');
+  if (_isMultiUser) {
+    unEl.classList.remove('hidden');
+    hint.textContent = '请输入用户名和密码';
+  } else {
+    unEl.classList.add('hidden');
+    hint.textContent = '请输入访问密码';
+  }
   document.getElementById('auth-overlay').classList.remove('hidden');
-  document.getElementById('auth-password').focus();
+  if (_isMultiUser) {
+    document.getElementById('auth-username').focus();
+  } else {
+    document.getElementById('auth-password').focus();
+  }
+}
+
+function _setAuthUser(username) {
+  authUsername = username || '';
+  sessionStorage.setItem('nanobotUser', authUsername);
+  var el = document.getElementById('header-user');
+  if (authUsername) {
+    el.textContent = '👤 ' + authUsername;
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
 }
 
 async function submitAuth() {
   var pw = document.getElementById('auth-password').value;
+  var un = document.getElementById('auth-username').value;
   var errEl = document.getElementById('auth-error');
   errEl.textContent = '';
+  var body = _isMultiUser ? { username: un, password: pw } : { password: pw };
   try {
     var res = await fetch('/v1/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pw }),
+      body: JSON.stringify(body),
     });
     if (res.ok) {
       var data = await res.json();
       authToken = data.token || '';
       sessionStorage.setItem('nanobotToken', authToken);
+      _setAuthUser(data.username || '');
       document.getElementById('auth-overlay').classList.add('hidden');
       init();
     } else {
-      errEl.textContent = '密码错误，请重试';
-      document.getElementById('auth-password').select();
+      errEl.textContent = _isMultiUser ? '用户名或密码错误，请重试' : '密码错误，请重试';
+      if (_isMultiUser) {
+        document.getElementById('auth-username').select();
+      } else {
+        document.getElementById('auth-password').select();
+      }
     }
   } catch (e) {
     errEl.textContent = '请求失败，请检查网络';
   }
 }
 
+document.getElementById('auth-username').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') document.getElementById('auth-password').focus();
+});
 document.getElementById('auth-password').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') submitAuth();
 });
 
 function init() {
+  _setAuthUser(authUsername);  // show username in header if already stored
   var s = getSes(activeSessionId);
   s.chatEl.style.display = '';   // make the default session visible
   loadSessionList();
@@ -2119,6 +2170,7 @@ function connectSession(sid) {
       s.streamBubbleEl.innerHTML = renderMarkdown(s.streamBuffer);
       enhanceBubble(s.streamBubbleEl);
       s.streamBubbleEl = null; s.streamBuffer = '';
+      s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
     }
     s.busy = false;
     updateSessionDot(sid);
@@ -2213,6 +2265,7 @@ async function clearSession() {
   s.currentStepsGroup = null; s.stepsCounter = 0;
   s.toolsUsed = []; s.skillsUsed = [];
   s.filesWrittenThisTurn = []; s.streamBubbleEl = null; s.streamBuffer = '';
+  s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
   appendSystem('会话「' + sid + '」已清除');
   loadSessionList();
 }
@@ -2325,9 +2378,29 @@ function streamToken(delta) {
     chatAppend(el);
     s.streamBubbleEl = el.querySelector('.bubble');
     s.streamBuffer = '';
+    s.streamTokenCount = 0;
+    s.streamStartTime = Date.now();
+    // Rate overlay — floats above the caret
+    var rateEl = document.createElement('span');
+    rateEl.className = 'stream-rate';
+    s.streamBubbleEl.appendChild(rateEl);
+    s.streamRateEl = rateEl;
   }
   s.streamBuffer += delta;
-  s.streamBubbleEl.textContent = s.streamBuffer;
+  s.streamTokenCount++;
+  // Update rate every 8 tokens to avoid excessive DOM writes
+  if (s.streamRateEl && s.streamTokenCount % 8 === 0) {
+    var elapsed = (Date.now() - s.streamStartTime) / 1000;
+    if (elapsed > 0.5) {
+      s.streamRateEl.textContent = Math.round(s.streamTokenCount / elapsed) + ' tok/s';
+    }
+  }
+  // Use textContent on a text node so the rate overlay (child element) is preserved
+  if (s.streamBubbleEl.firstChild && s.streamBubbleEl.firstChild.nodeType === Node.TEXT_NODE) {
+    s.streamBubbleEl.firstChild.textContent = s.streamBuffer;
+  } else {
+    s.streamBubbleEl.insertBefore(document.createTextNode(s.streamBuffer), s.streamBubbleEl.firstChild);
+  }
   scrollBottom();
 }
 
@@ -2339,6 +2412,9 @@ function streamCancel() {
   }
   s.streamBubbleEl = null;
   s.streamBuffer = '';
+  s.streamRateEl = null;
+  s.streamTokenCount = 0;
+  s.streamStartTime = 0;
 }
 
 function streamFinalize(finalText) {
@@ -2349,6 +2425,9 @@ function streamFinalize(finalText) {
   enhanceBubble(s.streamBubbleEl);
   s.streamBubbleEl = null;
   s.streamBuffer = '';
+  s.streamRateEl = null;
+  s.streamTokenCount = 0;
+  s.streamStartTime = 0;
   scrollBottom();
   return true;
 }

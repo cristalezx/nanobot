@@ -98,13 +98,22 @@ def create_app(
     heartbeat=None,
     password: str | None = None,
     allow_host_paths: bool = False,
+    user_agents: dict[str, dict] | None = None,
 ) -> FastAPI:
-    """Build and return the FastAPI application."""
+    """Build and return the FastAPI application.
+
+    ``user_agents`` enables multi-user mode:
+    ``{username: {"password": str, "agent": AgentLoop, "bus": MessageBus}}``
+    """
 
     manager = ConnectionManager()
-    _tokens: set[str] = set()  # active session tokens (in-memory)
+    _is_multi_user = user_agents is not None
+    # token → username; empty string means "single-user / no username"
+    _tokens: dict[str, str] = {}
 
-    # Read-only share links: share_id -> session_id.
+    # Read-only share links: share_id → raw value.
+    # Single-user: raw = session_id.
+    # Multi-user:  raw = f"{username}\x00{session_id}".
     # Held in memory for O(1) concurrent reads; persisted to disk for restarts.
     _shares_path = agent.context.workspace.resolve() / ".perrobot_shares.json"
     _shares_lock = asyncio.Lock()
@@ -122,24 +131,48 @@ def create_app(
             logger.warning("Failed to persist share links: {}", e)
             return False
 
-    def _session_for_share(share_id: str) -> str | None:
-        return _shares.get(share_id)
+    def _session_for_share(share_id: str) -> tuple[AgentLoop, str] | None:
+        """Return (agent, session_id) for a share, or None if not found."""
+        raw = _shares.get(share_id)
+        if raw is None:
+            return None
+        if "\x00" in raw:
+            username, session_id = raw.split("\x00", 1)
+            if _is_multi_user and username in user_agents:
+                return user_agents[username]["agent"], session_id
+            return agent, session_id
+        return agent, raw
 
     def _check_token(request: Request) -> None:
-        """Raise 401 if password is set and request carries no valid token."""
-        if not password:
+        """Raise 401 if auth is required and request carries no valid token."""
+        if not password and not _is_multi_user:
             return
         token = request.headers.get("X-Token") or request.query_params.get("token")
         if not token or token not in _tokens:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-    def _resolve_path(path: str) -> Path:
+    def _get_agent(request: Request) -> AgentLoop:
+        """Verify auth and return the appropriate agent for this request.
+
+        In single-user mode: performs the existing token check and returns ``agent``.
+        In multi-user mode: resolves the token to a username and returns that user's agent.
+        """
+        token = request.headers.get("X-Token") or request.query_params.get("token")
+        if _is_multi_user:
+            username = _tokens.get(token or "")
+            if not username:
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            return user_agents[username]["agent"]
+        _check_token(request)
+        return agent
+
+    def _resolve_path(path: str, ag: AgentLoop | None = None) -> Path:
         """Resolve a path according to allow_host_paths setting.
 
         Returns the resolved absolute Path.
         Raises HTTPException 403 if path escapes workspace when not allow_host_paths.
         """
-        workspace = agent.context.workspace.resolve()
+        workspace = (ag or agent).context.workspace.resolve()
         if allow_host_paths and path and Path(path).is_absolute():
             target = Path(path).resolve()
         else:
@@ -151,13 +184,13 @@ def create_app(
                 raise HTTPException(status_code=403, detail="Path outside workspace")
         return target
 
-    def _resolve_skill_dir(name: str) -> tuple[Path, str] | None:
+    def _resolve_skill_dir(name: str, ag: AgentLoop | None = None) -> tuple[Path, str] | None:
         """Resolve a skill's directory. A workspace copy shadows the builtin.
 
         Returns (directory, source) where source is "workspace" or "builtin",
         or None if no skill with that name exists.
         """
-        loader = agent.context.skills
+        loader = (ag or agent).context.skills
         ws_dir = loader.workspace_skills / name
         if (ws_dir / "SKILL.md").exists():
             return ws_dir, "workspace"
@@ -181,25 +214,38 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        task = asyncio.create_task(_dispatch_outbound())
-        logger.info("Outbound dispatcher started")
+        # Start one outbound dispatcher per bus (default + each user in multi-user mode).
+        buses: list[tuple[MessageBus, str]] = [(bus, "")]
+        if _is_multi_user:
+            for uname, ua in user_agents.items():
+                buses.append((ua["bus"], uname))
+        tasks = [
+            asyncio.create_task(_dispatch_outbound(b, prefix))
+            for b, prefix in buses
+        ]
+        logger.info("Outbound dispatcher started ({} bus(es))", len(tasks))
         yield
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        for t in tasks:
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
 
     app = FastAPI(title="nanobot", version="1.0", lifespan=lifespan)
 
-    async def _dispatch_outbound() -> None:
+    async def _dispatch_outbound(b: MessageBus, prefix: str = "") -> None:
         """Forward bus outbound messages (e.g. cron alerts) to WebSocket clients."""
         while True:
             try:
-                msg: OutboundMessage = await bus.consume_outbound()
+                msg: OutboundMessage = await b.consume_outbound()
                 if msg.metadata.get("_progress"):
                     continue
-                key = f"{msg.channel}:{msg.chat_id}"
+                # In multi-user mode the WS key is "{username}:web:{chat_id}".
+                if prefix:
+                    key = f"{prefix}:{msg.channel}:{msg.chat_id}"
+                else:
+                    key = f"{msg.channel}:{msg.chat_id}"
                 logger.info("Dispatch push -> {} ({} chars)", key, len(msg.content or ""))
                 await manager.send(key, {"type": "push", "content": msg.content})
             except asyncio.CancelledError:
@@ -231,20 +277,29 @@ def create_app(
     # ------------------------------------------------------------------ Auth
     @app.post("/v1/auth")
     async def authenticate(request: Request):
-        """Validate password and return a session token."""
-        if not password:
-            # No password configured — return a dummy token
+        """Validate credentials and return a session token."""
+        if not password and not _is_multi_user:
+            # No auth configured — return a dummy token
             return {"token": "no-auth", "required": False}
         body = await request.json()
-        if body.get("password") == password:
-            token = secrets.token_hex(32)
-            _tokens.add(token)
-            return {"token": token, "required": True}
-        raise HTTPException(status_code=403, detail="Invalid password")
+        if _is_multi_user:
+            username = body.get("username", "")
+            pw = body.get("password", "")
+            if username in user_agents and user_agents[username].get("password") == pw:
+                token = secrets.token_hex(32)
+                _tokens[token] = username
+                return {"token": token, "required": True, "username": username}
+            raise HTTPException(status_code=403, detail="无效的用户名或密码")
+        else:
+            if body.get("password") == password:
+                token = secrets.token_hex(32)
+                _tokens[token] = ""
+                return {"token": token, "required": True}
+            raise HTTPException(status_code=403, detail="Invalid password")
 
     @app.get("/v1/auth/required")
     async def auth_required():
-        return {"required": bool(password)}
+        return {"required": bool(password or _is_multi_user), "multi_user": _is_multi_user}
 
     # ------------------------------------------------------------------ REST
     @app.get("/v1/health")
@@ -253,12 +308,12 @@ def create_app(
 
     @app.get("/v1/debug/system-prompt")
     async def debug_system_prompt(request: Request):
-        _check_token(request)
-        prompt = agent.context.build_system_prompt()
-        skills = agent.context.skills.list_skills(filter_unavailable=False)
-        always = agent.context.skills.get_always_skills()
+        ag = _get_agent(request)
+        prompt = ag.context.build_system_prompt()
+        skills = ag.context.skills.list_skills(filter_unavailable=False)
+        always = ag.context.skills.get_always_skills()
         return {
-            "workspace": str(agent.context.workspace),
+            "workspace": str(ag.context.workspace),
             "always_skills": always,
             "all_skills": skills,
             "system_prompt": prompt,
@@ -274,26 +329,26 @@ def create_app(
 
     @app.get("/v1/sessions")
     async def list_sessions(request: Request):
-        _check_token(request)
-        return {"sessions": agent.sessions.list_sessions()}
+        ag = _get_agent(request)
+        return {"sessions": ag.sessions.list_sessions()}
 
     @app.delete("/v1/sessions/{session_id:path}")
     async def clear_session(session_id: str, request: Request):
-        _check_token(request)
-        session = agent.sessions.get_or_create(session_id)
+        ag = _get_agent(request)
+        session = ag.sessions.get_or_create(session_id)
         session.clear()
-        agent.sessions.save(session)
-        agent.sessions.invalidate(session_id)
+        ag.sessions.save(session)
+        ag.sessions.invalidate(session_id)
         # Also remove the JSONL file so it disappears from the list
-        path = agent.sessions._get_session_path(session_id)
+        path = ag.sessions._get_session_path(session_id)
         if path.exists():
             path.unlink()
         return {"ok": True, "session_id": session_id}
 
     @app.get("/v1/sessions/{session_id:path}/messages")
     async def get_session_messages(session_id: str, request: Request):
-        _check_token(request)
-        session = agent.sessions.get_or_create(session_id)
+        ag = _get_agent(request)
+        session = ag.sessions.get_or_create(session_id)
         history = []
         for m in session.messages:
             role = m.get("role")
@@ -305,10 +360,10 @@ def create_app(
     @app.get("/v1/sessions/{session_id:path}/export")
     async def export_session(session_id: str, request: Request, format: str = Query("md")):
         """Export a session as a markdown file download."""
-        _check_token(request)
+        ag = _get_agent(request)
         import tempfile
 
-        session = agent.sessions.get_or_create(session_id)
+        session = ag.sessions.get_or_create(session_id)
         lines = []
         for m in session.messages:
             role = m.get("role")
@@ -344,16 +399,20 @@ def create_app(
     @app.post("/v1/share")
     async def create_share(request: Request, body: ShareRequest):
         """Create (or reuse) a read-only share link for a session."""
-        _check_token(request)
+        ag = _get_agent(request)
         session_id = body.session_id
+        # In multi-user mode encode username into the share value.
+        username = _tokens.get(
+            request.headers.get("X-Token") or request.query_params.get("token") or "", ""
+        )
+        share_val = f"{username}\x00{session_id}" if _is_multi_user else session_id
         async with _shares_lock:
             for sid, target in _shares.items():
-                if target == session_id:
+                if target == share_val:
                     return {"share_id": sid, "url": f"/share/{sid}"}
             share_id = secrets.token_urlsafe(16)
-            _shares[share_id] = session_id
+            _shares[share_id] = share_val
             if not await _persist_shares():
-                # Roll back in-memory state so the returned id is always valid
                 _shares.pop(share_id, None)
                 raise HTTPException(status_code=500, detail="Failed to persist share link")
         return {"share_id": share_id, "url": f"/share/{share_id}"}
@@ -379,10 +438,11 @@ def create_app(
     @app.get("/v1/share/{share_id}/data")
     async def share_data(share_id: str):
         """Return a shared session's messages (no auth — share_id is the secret)."""
-        session_id = _session_for_share(share_id)
-        if not session_id:
+        result = _session_for_share(share_id)
+        if not result:
             raise HTTPException(status_code=404, detail="Share not found or revoked")
-        session = agent.sessions.get_or_create(session_id)
+        ag, session_id = result
+        session = ag.sessions.get_or_create(session_id)
         history = []
         for m in session.messages:
             role = m.get("role")
@@ -396,14 +456,14 @@ def create_app(
     @app.get("/v1/models")
     async def list_models(request: Request):
         """Return available models from config (no secrets)."""
-        _check_token(request)
+        ag = _get_agent(request)
         try:
             from nanobot.providers.custom_provider import load_models_config
             cfg = load_models_config()
         except Exception:
             cfg = {}
         models_raw = cfg.get("models", {})
-        current = getattr(agent.provider, "default_model", cfg.get("default_model", ""))
+        current = getattr(ag.provider, "default_model", cfg.get("default_model", ""))
         models = [
             {"id": mid, "label": entry.get("label", mid)}
             for mid, entry in models_raw.items()
@@ -413,8 +473,8 @@ def create_app(
     @app.post("/v1/model")
     async def switch_model(request: Request, body: ModelSwitchRequest):
         """Hot-switch the LLM model on the running agent provider."""
-        _check_token(request)
-        provider = agent.provider
+        ag = _get_agent(request)
+        provider = ag.provider
         if not hasattr(provider, "switch_model"):
             raise HTTPException(status_code=400, detail="Provider does not support model switching")
         provider.switch_model(body.model)
@@ -424,8 +484,8 @@ def create_app(
     @app.get("/v1/skills")
     async def list_skills_api(request: Request):
         """List all skills (builtin + workspace) with source and availability."""
-        _check_token(request)
-        loader = agent.context.skills
+        ag = _get_agent(request)
+        loader = ag.context.skills
         always = set(loader.get_always_skills())
         out = []
         for s in loader.list_skills(filter_unavailable=False):
@@ -446,10 +506,10 @@ def create_app(
     @app.get("/v1/skills/{name}")
     async def get_skill_api(name: str, request: Request):
         """Return a skill's raw SKILL.md content and whether it is editable."""
-        _check_token(request)
+        ag = _get_agent(request)
         if not _SKILL_NAME_RE.match(name):
             raise HTTPException(status_code=400, detail="Invalid skill name")
-        loader = agent.context.skills
+        loader = ag.context.skills
         content = loader.load_skill(name)
         if content is None:
             raise HTTPException(status_code=404, detail="Skill not found")
@@ -462,10 +522,10 @@ def create_app(
     @app.put("/v1/skills/{name}")
     async def save_skill_api(name: str, request: Request, body: SkillSaveRequest):
         """Create or update a workspace skill (writes workspace/skills/<name>/SKILL.md)."""
-        _check_token(request)
+        ag = _get_agent(request)
         if not _SKILL_NAME_RE.match(name):
             raise HTTPException(status_code=400, detail="Invalid skill name")
-        loader = agent.context.skills
+        loader = ag.context.skills
         skill_dir = loader.workspace_skills / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(body.content, encoding="utf-8")
@@ -474,10 +534,10 @@ def create_app(
     @app.delete("/v1/skills/{name}")
     async def delete_skill_api(name: str, request: Request):
         """Delete a workspace skill. Builtin skills cannot be deleted."""
-        _check_token(request)
+        ag = _get_agent(request)
         if not _SKILL_NAME_RE.match(name):
             raise HTTPException(status_code=400, detail="Invalid skill name")
-        loader = agent.context.skills
+        loader = ag.context.skills
         skill_dir = loader.workspace_skills / name
         if not (skill_dir / "SKILL.md").exists():
             raise HTTPException(status_code=404, detail="No workspace skill to delete")
@@ -487,10 +547,10 @@ def create_app(
     @app.get("/v1/skills/{name}/files")
     async def list_skill_files_api(name: str, request: Request):
         """List every file inside a skill package (recursive), not just SKILL.md."""
-        _check_token(request)
+        ag = _get_agent(request)
         if not _SKILL_NAME_RE.match(name):
             raise HTTPException(status_code=400, detail="Invalid skill name")
-        resolved = _resolve_skill_dir(name)
+        resolved = _resolve_skill_dir(name, ag)
         if resolved is None:
             raise HTTPException(status_code=404, detail="Skill not found")
         base, source = resolved
@@ -508,10 +568,10 @@ def create_app(
     @app.get("/v1/skills/{name}/file")
     async def read_skill_file_api(name: str, request: Request, path: str = Query(...)):
         """Return the content of one file within a skill package."""
-        _check_token(request)
+        ag = _get_agent(request)
         if not _SKILL_NAME_RE.match(name):
             raise HTTPException(status_code=400, detail="Invalid skill name")
-        resolved = _resolve_skill_dir(name)
+        resolved = _resolve_skill_dir(name, ag)
         if resolved is None:
             raise HTTPException(status_code=404, detail="Skill not found")
         base, source = resolved
@@ -530,10 +590,10 @@ def create_app(
     @app.put("/v1/skills/{name}/file")
     async def write_skill_file_api(name: str, request: Request, body: SkillFileSaveRequest):
         """Create or update one file inside a workspace skill package."""
-        _check_token(request)
+        ag = _get_agent(request)
         if not _SKILL_NAME_RE.match(name):
             raise HTTPException(status_code=400, detail="Invalid skill name")
-        loader = agent.context.skills
+        loader = ag.context.skills
         ws_dir = loader.workspace_skills / name
         target = _resolve_skill_file(ws_dir, body.path)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -543,10 +603,10 @@ def create_app(
     @app.post("/v1/skills/{name}/copy")
     async def copy_skill_api(name: str, request: Request):
         """Copy a builtin skill package (all files) into the workspace for editing."""
-        _check_token(request)
+        ag = _get_agent(request)
         if not _SKILL_NAME_RE.match(name):
             raise HTTPException(status_code=400, detail="Invalid skill name")
-        loader = agent.context.skills
+        loader = ag.context.skills
         ws_dir = loader.workspace_skills / name
         if (ws_dir / "SKILL.md").exists():
             return {"ok": True, "name": name, "source": "workspace"}
@@ -561,9 +621,9 @@ def create_app(
     @app.get("/v1/files")
     async def list_files(request: Request, path: str = Query("")):
         """Browse the workspace directory tree (or host if allow_host_paths)."""
-        _check_token(request)
-        workspace = agent.context.workspace.resolve()
-        target = _resolve_path(path)
+        ag = _get_agent(request)
+        workspace = ag.context.workspace.resolve()
+        target = _resolve_path(path, ag)
 
         if not target.exists():
             raise HTTPException(status_code=404, detail="Path not found")
@@ -608,8 +668,8 @@ def create_app(
     @app.put("/v1/files")
     async def save_file(request: Request, body: FileSaveRequest):
         """Save (write) file content to disk."""
-        _check_token(request)
-        target = _resolve_path(body.path)
+        ag = _get_agent(request)
+        target = _resolve_path(body.path, ag)
 
         if target.is_dir():
             raise HTTPException(status_code=400, detail="Path is a directory")
@@ -631,20 +691,20 @@ def create_app(
         allow_host_paths). The uploaded filename is appended to it. Returns the
         saved path so the UI can reference it in a chat message.
         """
-        _check_token(request)
+        ag = _get_agent(request)
 
         # Sanitize the client-supplied filename — strip any directory components.
         raw_name = file.filename or "upload"
         name = Path(raw_name).name or "upload"
 
-        target_dir = _resolve_path(path) if path else agent.context.workspace.resolve()
+        target_dir = _resolve_path(path, ag) if path else ag.context.workspace.resolve()
         if target_dir.exists() and target_dir.is_file():
             raise HTTPException(status_code=400, detail="Target path is a file, not a directory")
         target_dir.mkdir(parents=True, exist_ok=True)
 
         target = (target_dir / name).resolve()
         # Re-validate the final path stays within the allowed subtree.
-        workspace = agent.context.workspace.resolve()
+        workspace = ag.context.workspace.resolve()
         if not allow_host_paths:
             try:
                 target.relative_to(workspace)
@@ -681,8 +741,8 @@ def create_app(
     @app.get("/v1/files/download")
     async def download_file(request: Request, path: str = Query(...)):
         """Download a file as an attachment."""
-        _check_token(request)
-        target = _resolve_path(path)
+        ag = _get_agent(request)
+        target = _resolve_path(path, ag)
 
         if not target.exists():
             raise HTTPException(status_code=404, detail="File not found")
@@ -708,12 +768,23 @@ def create_app(
     # ------------------------------------------------------------------ WebSocket
     @app.websocket("/v1/ws/{session_id:path}")
     async def ws_endpoint(ws: WebSocket, session_id: str, token: str = Query("")):
-        if password and token not in _tokens:
+        if _is_multi_user:
+            username = _tokens.get(token)
+            if not username:
+                await ws.close(code=4001)
+                return
+            ag = user_agents[username]["agent"]
+            # Prefix the WS key with username to isolate users' push notifications.
+            key = f"{username}:web:{session_id}"
+        elif password and token not in _tokens:
             await ws.close(code=4001)
             return
+        else:
+            ag = agent
+            key = f"web:{session_id}"
 
-        channel, chat_id = "web", session_id
-        key = f"{channel}:{chat_id}"
+        chat_id = session_id
+        session_key = f"web:{session_id}"
         await manager.connect(key, ws)
 
         # Pending human-approval requests, keyed by id. Resolved when the client
@@ -769,11 +840,11 @@ def create_app(
 
         async def handle_message(content: str) -> None:
             msg = InboundMessage(
-                channel=channel, sender_id="web_user", chat_id=chat_id, content=content,
+                channel="web", sender_id="web_user", chat_id=chat_id, content=content,
             )
             try:
-                response = await agent._process_message(
-                    msg, session_key=key, on_progress=on_progress,
+                response = await ag._process_message(
+                    msg, session_key=session_key, on_progress=on_progress,
                     on_token=on_token, on_approval=on_approval,
                 )
                 if response is not None:
