@@ -609,50 +609,106 @@ def create_app(
         channel, chat_id = "web", session_id
         key = f"{channel}:{chat_id}"
         await manager.connect(key, ws)
+
+        # Pending human-approval requests, keyed by id. Resolved when the client
+        # sends back an {type: approval_response, id, approved} message.
+        pending_approvals: dict[str, asyncio.Future] = {}
+
+        async def on_progress(text: str, *, tool_hint: bool = False, skill_hint: bool = False) -> None:
+            msg_type = "skill" if skill_hint else ("tool" if tool_hint else "progress")
+            try:
+                await ws.send_json({"type": msg_type, "content": text})
+            except Exception:
+                pass  # client may have disconnected mid-turn; keep the loop alive
+
+        async def on_token(kind: str, text: str) -> None:
+            try:
+                if kind == "delta":
+                    await ws.send_json({"type": "token", "content": text})
+                elif kind == "cancel":
+                    await ws.send_json({"type": "token_cancel"})
+            except Exception:
+                pass  # client disconnected mid-stream; agent loop continues to completion
+
+        async def on_approval(command: str, reason: str) -> bool:
+            """Ask the client to approve a dangerous command; block until answered."""
+            approval_id = secrets.token_hex(8)
+            loop = asyncio.get_event_loop()
+            fut: asyncio.Future = loop.create_future()
+            pending_approvals[approval_id] = fut
+            try:
+                await ws.send_json({
+                    "type": "approval_request",
+                    "id": approval_id,
+                    "command": command,
+                    "reason": reason,
+                })
+            except Exception:
+                pending_approvals.pop(approval_id, None)
+                return False
+            try:
+                # Generous window; if the user walks away, deny rather than hang.
+                return await asyncio.wait_for(fut, timeout=300)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                return False
+            finally:
+                pending_approvals.pop(approval_id, None)
+
+        async def handle_message(content: str) -> None:
+            msg = InboundMessage(
+                channel=channel, sender_id="web_user", chat_id=chat_id, content=content,
+            )
+            try:
+                response = await agent._process_message(
+                    msg, session_key=key, on_progress=on_progress,
+                    on_token=on_token, on_approval=on_approval,
+                )
+                if response is not None:
+                    await ws.send_json({"type": "message", "content": response.content or ""})
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error("Message processing error for {}: {}", key, e)
+                # Unstick the client (it only clears "busy" on a message/push).
+                try:
+                    await ws.send_json({"type": "message", "content": f"⚠️ 处理出错：{e}"})
+                except Exception:
+                    pass
+
+        current_task: asyncio.Task | None = None
         try:
             while True:
                 data = await ws.receive_json()
+
+                # Approval replies must be handled even while a turn is running,
+                # so processing runs as a background task and the receive loop
+                # keeps reading. Demux approval responses here.
+                if data.get("type") == "approval_response":
+                    fut = pending_approvals.get(data.get("id"))
+                    if fut is not None and not fut.done():
+                        fut.set_result(bool(data.get("approved")))
+                    continue
+
                 content = (data.get("content") or "").strip()
                 if not content:
                     continue
-
-                async def on_progress(text: str, *, tool_hint: bool = False, skill_hint: bool = False) -> None:
-                    if skill_hint:
-                        msg_type = "skill"
-                    elif tool_hint:
-                        msg_type = "tool"
-                    else:
-                        msg_type = "progress"
-                    await ws.send_json({"type": msg_type, "content": text})
-
-                async def on_token(kind: str, text: str) -> None:
-                    try:
-                        if kind == "delta":
-                            await ws.send_json({"type": "token", "content": text})
-                        elif kind == "cancel":
-                            await ws.send_json({"type": "token_cancel"})
-                    except Exception:
-                        pass  # client disconnected mid-stream; agent loop continues to completion
-
-                msg = InboundMessage(
-                    channel=channel,
-                    sender_id="web_user",
-                    chat_id=chat_id,
-                    content=content,
-                )
-                response = await agent._process_message(
-                    msg, session_key=key, on_progress=on_progress, on_token=on_token
-                )
-                if response is not None:
-                    await ws.send_json({
-                        "type": "message",
-                        "content": response.content or "",
-                    })
+                # One in-flight turn per connection (UI gates send while busy).
+                if current_task is not None and not current_task.done():
+                    await ws.send_json({"type": "progress", "content": "上一条还在处理中，请稍候…"})
+                    continue
+                current_task = asyncio.create_task(handle_message(content))
         except WebSocketDisconnect:
             pass
         except Exception as e:
             logger.error("WebSocket error for {}: {}", key, e)
         finally:
+            # Release any pending approval as "denied" so it doesn't hang, then
+            # cancel the in-flight turn — the client is gone, nothing to deliver.
+            for fut in pending_approvals.values():
+                if not fut.done():
+                    fut.set_result(False)
+            if current_task is not None and not current_task.done():
+                current_task.cancel()
             manager.disconnect(key, ws)
 
     return app

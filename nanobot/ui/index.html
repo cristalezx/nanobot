@@ -383,6 +383,28 @@ body.resizing iframe { pointer-events: none; }
                          border-radius: 6px; padding: 8px 10px; margin: 8px 0;
                          font-size: 0.8rem; white-space: pre-wrap; }
 
+/* ── Approval card ── */
+.approval-card {
+  align-self: center; width: 100%; max-width: 760px;
+  background: #fff8e6; border: 1px solid #f0d480; border-radius: 12px;
+  padding: 12px 14px; margin: 2px 0;
+}
+.approval-card.approved { background: #f0f9f2; border-color: #bfe3c9; }
+.approval-card.denied { background: #fdeceb; border-color: #f3c4c0; }
+.approval-head { font-weight: 650; font-size: 0.86rem; color: #8a6d1a; margin-bottom: 6px; }
+.approval-card.approved .approval-head { color: #2e7d32; }
+.approval-card.denied .approval-head { color: #c0392b; }
+.approval-reason { font-size: 0.82rem; color: var(--text); margin-bottom: 8px; }
+.approval-cmd {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem;
+  white-space: pre-wrap; word-break: break-all; margin-bottom: 10px; color: var(--text);
+}
+.approval-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+.approval-result { font-size: 0.82rem; font-weight: 600; }
+.approval-result.ok { color: #2e7d32; }
+.approval-result.no { color: #c0392b; }
+
 /* ── Steps ── */
 .steps-group { align-self: flex-start; max-width: 92%; margin: 2px 0; }
 .steps-toggle {
@@ -1833,6 +1855,9 @@ function connect() {
     } else if (msg.type === 'skill') {
       removeTyping();
       appendSkillUsed(msg.content);
+    } else if (msg.type === 'approval_request') {
+      removeTyping();
+      appendApprovalRequest(msg.id, msg.command, msg.reason);
     } else if (msg.type === 'message') {
       removeTyping();
       collapseCurrentSteps();
@@ -2020,6 +2045,39 @@ function streamFinalize(finalText) {
   streamBuffer = '';
   scrollBottom();
   return true;
+}
+
+// ── Approval requests ──────────────────────────────────────────────────────
+function appendApprovalRequest(id, command, reason) {
+  collapseCurrentSteps();
+  var el = document.createElement('div');
+  el.className = 'approval-card';
+  el.id = 'approval-' + id;
+  el.innerHTML =
+    '<div class="approval-head">⚠️ 需要你确认一个高危操作</div>' +
+    '<div class="approval-reason">' + escapeHtml(reason || '') + '</div>' +
+    '<pre class="approval-cmd">' + escapeHtml(command || '') + '</pre>' +
+    '<div class="approval-actions">' +
+      '<button class="btn danger" onclick="respondApproval(\'' + escapeAttr(id) + '\', false)">拒绝</button>' +
+      '<button class="btn" onclick="respondApproval(\'' + escapeAttr(id) + '\', true)">批准执行</button>' +
+    '</div>';
+  chat.appendChild(el);
+  scrollBottom();
+}
+
+function respondApproval(id, approved) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'approval_response', id: id, approved: approved }));
+  }
+  var card = document.getElementById('approval-' + id);
+  if (card) {
+    var actions = card.querySelector('.approval-actions');
+    if (actions) actions.innerHTML =
+      '<span class="approval-result ' + (approved ? 'ok' : 'no') + '">' +
+      (approved ? '✓ 已批准' : '✕ 已拒绝') + '</span>';
+    card.classList.add(approved ? 'approved' : 'denied');
+  }
+  if (!approved) showTyping();  // agent will adapt; keep the busy indicator alive
 }
 
 function appendSystem(text) {

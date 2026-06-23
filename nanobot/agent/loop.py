@@ -182,6 +182,7 @@ class AgentLoop:
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_token: Callable[..., Awaitable[None]] | None = None,
+        on_approval: Callable[..., Awaitable[bool]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -272,7 +273,9 @@ class AgentLoop:
                         if Path(path).name == "SKILL.md":
                             skill_name = Path(path).parent.name
                             await on_progress(skill_name, skill_hint=True)
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result = await self.tools.execute(
+                        tool_call.name, tool_call.arguments, approval_cb=on_approval
+                    )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -377,6 +380,7 @@ class AgentLoop:
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_token: Callable[..., Awaitable[None]] | None = None,
+        on_approval: Callable[..., Awaitable[bool]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -480,7 +484,7 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
-            on_token=on_token,
+            on_token=on_token, on_approval=on_approval,
         )
 
         if final_content is None:

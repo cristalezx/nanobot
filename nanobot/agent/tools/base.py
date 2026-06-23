@@ -21,6 +21,11 @@ class Tool(ABC):
         "object": dict,
     }
 
+    # Tools that can request human approval for risky actions set this True and
+    # accept an ``approval_cb`` keyword in ``execute``. The registry only passes
+    # the callback to tools that opt in, so other tools keep their signatures.
+    supports_approval: bool = False
+
     @property
     @abstractmethod
     def name(self) -> str:

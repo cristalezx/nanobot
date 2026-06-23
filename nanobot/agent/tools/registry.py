@@ -35,8 +35,12 @@ class ToolRegistry:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
 
-    async def execute(self, name: str, params: dict[str, Any]) -> str:
-        """Execute a tool by name with given parameters."""
+    async def execute(self, name: str, params: dict[str, Any], approval_cb: Any = None) -> str:
+        """Execute a tool by name with given parameters.
+
+        ``approval_cb`` (if provided) is forwarded only to tools that opt in via
+        ``supports_approval`` — used to request human approval for risky actions.
+        """
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
 
         tool = self._tools.get(name)
@@ -47,7 +51,10 @@ class ToolRegistry:
             errors = tool.validate_params(params)
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
-            result = await tool.execute(**params)
+            call_kwargs = dict(params)
+            if approval_cb is not None and getattr(tool, "supports_approval", False):
+                call_kwargs["approval_cb"] = approval_cb
+            result = await tool.execute(**call_kwargs)
             if isinstance(result, str) and result.startswith("Error"):
                 return result + _HINT
             return result
