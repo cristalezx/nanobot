@@ -159,7 +159,7 @@ body.resizing iframe { pointer-events: none; }
 #sidebar-sessions-header button:hover { background: var(--hover); color: var(--text); }
 #session-filter {
   flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text);
-  border-radius: 4px; padding: 3px 7px; font-size: 0.75rem; outline: none;
+  border-radius: 6px; padding: 7px 10px; font-size: 0.82rem; outline: none;
 }
 #session-filter:focus { border-color: var(--accent); }
 #session-list {
@@ -297,8 +297,30 @@ body.resizing iframe { pointer-events: none; }
 #skill-box-hint { padding: 8px 16px; font-size: 0.76rem; color: var(--text-dim);
   background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 #skill-box-hint.hidden { display: none; }
+#skill-box-body { flex: 1; display: flex; min-height: 0; }
+#skill-file-pane {
+  width: 190px; flex-shrink: 0; display: flex; flex-direction: column;
+  border-right: 1px solid var(--border); background: var(--bg); overflow: hidden;
+}
+#skill-file-pane-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 12px; font-size: 0.72rem; font-weight: 600; color: var(--text-dim);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#skill-newfile-btn {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 0.95rem; line-height: 1; padding: 0 4px; border-radius: 4px;
+}
+#skill-newfile-btn:hover { background: var(--hover); color: var(--text); }
+#skill-file-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.skill-file-item {
+  padding: 6px 12px; font-size: 0.77rem; cursor: pointer; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.skill-file-item:hover { background: var(--hover); color: var(--text); }
+.skill-file-item.active { background: var(--active); color: var(--text); font-weight: 550; }
 #skill-box-content {
-  flex: 1; border: none; outline: none; resize: none; padding: 14px 16px;
+  flex: 1; min-width: 0; border: none; outline: none; resize: none; padding: 14px 16px;
   font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace; font-size: 0.82rem;
   line-height: 1.6; color: var(--text); background: var(--surface);
 }
@@ -638,7 +660,16 @@ body.resizing iframe { pointer-events: none; }
       <button id="skill-box-close" onclick="closeSkillEditor()" title="关闭">✕</button>
     </div>
     <div id="skill-box-hint"></div>
-    <textarea id="skill-box-content" spellcheck="false" placeholder="技能内容（Markdown，带 YAML frontmatter）…"></textarea>
+    <div id="skill-box-body">
+      <div id="skill-file-pane">
+        <div id="skill-file-pane-head">
+          <span>文件</span>
+          <button id="skill-newfile-btn" onclick="newSkillFile()" title="新建文件">＋</button>
+        </div>
+        <div id="skill-file-list"></div>
+      </div>
+      <textarea id="skill-box-content" spellcheck="false" placeholder="技能内容（Markdown，带 YAML frontmatter）…"></textarea>
+    </div>
     <div id="skill-box-actions">
       <button class="btn danger" id="skill-delete-btn" onclick="deleteSkill()">删除</button>
       <div class="header-spacer"></div>
@@ -1335,7 +1366,7 @@ async function uploadChatAttachments(fileList) {
 
 // ── Skills ─────────────────────────────────────────────────────────────────
 // Modal state for the skill currently being viewed/edited.
-let currentSkill = { name: null, source: null, editable: false };
+let currentSkill = { name: null, source: null, editable: false, persisted: false, files: [] };
 
 async function loadSkills() {
   var list = document.getElementById('skills-list');
@@ -1380,55 +1411,107 @@ function renderSkills(skills) {
   });
 }
 
+// The file currently shown in the editor (relative path within the skill).
+let currentSkillFile = null;
+
 async function openSkillEditor(name) {
   try {
-    var res = await apiFetch('/v1/skills/' + encodeURIComponent(name));
+    var res = await apiFetch('/v1/skills/' + encodeURIComponent(name) + '/files');
     if (!res.ok) { alert('打开技能失败'); return; }
     var data = await res.json();
-    currentSkill = { name: data.name, source: data.source, editable: data.editable };
-    showSkillModal(data.content);
+    currentSkill = { name: data.name, source: data.source, editable: data.editable,
+                     persisted: true, files: data.files || [] };
+    currentSkillFile = null;
+    renderSkillChrome();
+    document.getElementById('skill-overlay').classList.remove('hidden');
+    var skillMd = currentSkill.files.filter(function(f){ return f.path === 'SKILL.md'; })[0];
+    var pick = skillMd || currentSkill.files[0];
+    if (pick) {
+      await openSkillFile(pick.path);
+    } else {
+      setSkillContent('（空技能目录）', null, false);
+    }
   } catch (e) {
     alert('打开技能失败：' + (e && e.message ? e.message : e));
   }
 }
 
-function showSkillModal(content) {
+// Render the modal frame (title, badge, hint, file list, buttons) — not content.
+function renderSkillChrome() {
   var s = currentSkill;
   document.getElementById('skill-box-title').textContent = s.name;
   var badge = document.getElementById('skill-box-badge');
   badge.textContent = s.source === 'workspace' ? '自定义' : '内置';
   badge.className = s.source === 'workspace' ? 'skill-badge workspace' : 'skill-badge builtin';
 
-  var ta = document.getElementById('skill-box-content');
-  ta.value = content || '';
-  ta.readOnly = !s.editable;
-
   var hint = document.getElementById('skill-box-hint');
   if (!s.editable) {
-    hint.textContent = '内置技能为只读。点击「复制到 workspace」生成可编辑的自定义副本（会覆盖同名内置技能）。';
+    hint.textContent = '内置技能为只读。点击「复制到 workspace」生成可编辑的自定义副本（含全部子文件，会覆盖同名内置技能）。';
     hint.classList.remove('hidden');
   } else {
     hint.classList.add('hidden');
   }
-  // Button visibility by editability
-  document.getElementById('skill-save-btn').style.display = s.editable ? '' : 'none';
-  document.getElementById('skill-delete-btn').style.display =
-    (s.editable && s.source === 'workspace') ? '' : 'none';
   document.getElementById('skill-copy-btn').style.display = s.editable ? 'none' : '';
+  document.getElementById('skill-delete-btn').style.display =
+    (s.editable && s.source === 'workspace' && s.persisted) ? '' : 'none';
+  document.getElementById('skill-newfile-btn').style.display =
+    (s.editable && s.persisted) ? '' : 'none';
+  renderSkillFileList();
+}
 
-  document.getElementById('skill-overlay').classList.remove('hidden');
+function renderSkillFileList() {
+  var list = document.getElementById('skill-file-list');
+  list.innerHTML = '';
+  currentSkill.files.forEach(function(f) {
+    var el = document.createElement('div');
+    el.className = 'skill-file-item' + (f.path === currentSkillFile ? ' active' : '');
+    el.textContent = f.path;
+    el.title = f.path;
+    var p = f.path;
+    el.onclick = function() { openSkillFile(p); };
+    list.appendChild(el);
+  });
+}
+
+// Load text into the editor and reconcile the file highlight + save button.
+function setSkillContent(text, path, editable) {
+  var ta = document.getElementById('skill-box-content');
+  ta.value = text;
+  ta.readOnly = !editable;
+  currentSkillFile = path;
+  document.getElementById('skill-save-btn').style.display = editable ? '' : 'none';
+  renderSkillFileList();
+}
+
+async function openSkillFile(path) {
+  try {
+    var url = '/v1/skills/' + encodeURIComponent(currentSkill.name) +
+              '/file?path=' + encodeURIComponent(path);
+    var res = await apiFetch(url);
+    if (!res.ok) { alert('打开文件失败'); return; }
+    var data = await res.json();
+    if (data.binary) {
+      setSkillContent('（二进制文件，无法在此预览：' + path + '）', path, false);
+    } else {
+      setSkillContent(data.content || '', path, currentSkill.editable);
+    }
+  } catch (e) {
+    alert('打开文件失败：' + (e && e.message ? e.message : e));
+  }
 }
 
 function closeSkillEditor() {
   document.getElementById('skill-overlay').classList.add('hidden');
-  currentSkill = { name: null, source: null, editable: false };
+  currentSkill = { name: null, source: null, editable: false, persisted: false, files: [] };
+  currentSkillFile = null;
 }
 
 function newSkill() {
   var name = prompt('新技能名称（字母/数字/-/_，将作为目录名）：');
   if (!name) return;
   if (!/^[a-zA-Z0-9_-]+$/.test(name)) { alert('名称只能包含字母、数字、连字符和下划线'); return; }
-  currentSkill = { name: name, source: 'workspace', editable: true };
+  currentSkill = { name: name, source: 'workspace', editable: true,
+                   persisted: false, files: [{ path: 'SKILL.md' }] };
   var tpl =
     '---\n' +
     'name: ' + name + '\n' +
@@ -1436,23 +1519,50 @@ function newSkill() {
     '---\n\n' +
     '# ' + name + '\n\n' +
     '在这里写下 agent 使用该技能的指引。\n';
-  showSkillModal(tpl);
+  renderSkillChrome();
+  setSkillContent(tpl, 'SKILL.md', true);
+  document.getElementById('skill-overlay').classList.remove('hidden');
+}
+
+// Add a new sub-file to a persisted workspace skill (e.g. scripts/run.sh).
+async function newSkillFile() {
+  if (!currentSkill.persisted) { alert('请先保存技能后再添加文件'); return; }
+  var path = prompt('新文件相对路径（如 scripts/run.sh）：');
+  if (!path) return;
+  if (path.charAt(0) === '/' || path.indexOf('..') !== -1) { alert('路径不合法'); return; }
+  if (currentSkill.files.some(function(f){ return f.path === path; })) { openSkillFile(path); return; }
+  try {
+    var res = await apiFetch('/v1/skills/' + encodeURIComponent(currentSkill.name) + '/file', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path, content: '' }),
+    });
+    if (!res.ok) { var e = await res.json().catch(function(){return {};}); alert('创建失败：' + (e.detail || res.status)); return; }
+    currentSkill.files.push({ path: path });
+    currentSkill.files.sort(function(a, b){ return a.path < b.path ? -1 : (a.path > b.path ? 1 : 0); });
+    setSkillContent('', path, true);
+  } catch (e) {
+    alert('创建失败：' + (e && e.message ? e.message : e));
+  }
 }
 
 async function saveSkill() {
-  if (!currentSkill.name) return;
+  if (!currentSkill.name || !currentSkillFile) return;
   var content = document.getElementById('skill-box-content').value;
   try {
-    var res = await apiFetch('/v1/skills/' + encodeURIComponent(currentSkill.name), {
+    var res = await apiFetch('/v1/skills/' + encodeURIComponent(currentSkill.name) + '/file', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: content }),
+      body: JSON.stringify({ path: currentSkillFile, content: content }),
     });
-    if (!res.ok) { var e = await res.json(); alert('保存失败：' + (e.detail || res.status)); return; }
+    if (!res.ok) { var e = await res.json().catch(function(){return {};}); alert('保存失败：' + (e.detail || res.status)); return; }
     currentSkill.source = 'workspace';
     currentSkill.editable = true;
-    appendSystem('技能已保存：' + currentSkill.name);
-    closeSkillEditor();
+    currentSkill.persisted = true;
+    if (!currentSkill.files.some(function(f){ return f.path === currentSkillFile; })) {
+      currentSkill.files.push({ path: currentSkillFile });
+    }
+    appendSystem('已保存：' + currentSkill.name + ' / ' + currentSkillFile);
+    renderSkillChrome();
     loadSkills();
   } catch (e) {
     alert('保存失败：' + (e && e.message ? e.message : e));
@@ -1461,7 +1571,7 @@ async function saveSkill() {
 
 async function deleteSkill() {
   if (!currentSkill.name) return;
-  if (!confirm('删除自定义技能「' + currentSkill.name + '」？若存在同名内置技能将恢复显示。')) return;
+  if (!confirm('删除自定义技能「' + currentSkill.name + '」（含全部子文件）？若存在同名内置技能将恢复显示。')) return;
   try {
     var res = await apiFetch('/v1/skills/' + encodeURIComponent(currentSkill.name), { method: 'DELETE' });
     if (!res.ok) { alert('删除失败'); return; }
@@ -1473,13 +1583,19 @@ async function deleteSkill() {
   }
 }
 
-// Turn a read-only builtin skill into an editable workspace copy.
-function copySkillToWorkspace() {
-  currentSkill.source = 'workspace';
-  currentSkill.editable = true;
-  // Re-render the modal in editable mode with the current textarea content.
-  showSkillModal(document.getElementById('skill-box-content').value);
-  appendSystem('已切换为可编辑副本，记得点「保存」写入 workspace');
+// Copy a read-only builtin skill (all files) into the workspace for editing.
+async function copySkillToWorkspace() {
+  var name = currentSkill.name;
+  if (!name) return;
+  try {
+    var res = await apiFetch('/v1/skills/' + encodeURIComponent(name) + '/copy', { method: 'POST' });
+    if (!res.ok) { var e = await res.json().catch(function(){return {};}); alert('复制失败：' + (e.detail || res.status)); return; }
+    appendSystem('已复制到 workspace（含全部子文件）：' + name);
+    await openSkillEditor(name);
+    loadSkills();
+  } catch (e) {
+    alert('复制失败：' + (e && e.message ? e.message : e));
+  }
 }
 
 // ── Editor Panel ───────────────────────────────────────────────────────────

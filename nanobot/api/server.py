@@ -82,6 +82,11 @@ class SkillSaveRequest(BaseModel):
     content: str
 
 
+class SkillFileSaveRequest(BaseModel):
+    path: str
+    content: str
+
+
 # Skill names map to directory names — restrict to a safe character set.
 _SKILL_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -144,6 +149,34 @@ def create_app(
                 target.relative_to(workspace)
             except ValueError:
                 raise HTTPException(status_code=403, detail="Path outside workspace")
+        return target
+
+    def _resolve_skill_dir(name: str) -> tuple[Path, str] | None:
+        """Resolve a skill's directory. A workspace copy shadows the builtin.
+
+        Returns (directory, source) where source is "workspace" or "builtin",
+        or None if no skill with that name exists.
+        """
+        loader = agent.context.skills
+        ws_dir = loader.workspace_skills / name
+        if (ws_dir / "SKILL.md").exists():
+            return ws_dir, "workspace"
+        bi_dir = loader.builtin_skills / name
+        if (bi_dir / "SKILL.md").exists():
+            return bi_dir, "builtin"
+        return None
+
+    def _resolve_skill_file(base: Path, rel: str) -> Path:
+        """Safely join a relative path inside a skill directory.
+
+        Raises HTTPException on traversal attempts or paths that escape ``base``.
+        """
+        if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+        base_resolved = base.resolve()
+        target = (base_resolved / rel).resolve()
+        if target != base_resolved and base_resolved not in target.parents:
+            raise HTTPException(status_code=403, detail="Path outside skill directory")
         return target
 
     @asynccontextmanager
@@ -450,6 +483,79 @@ def create_app(
             raise HTTPException(status_code=404, detail="No workspace skill to delete")
         shutil.rmtree(skill_dir)
         return {"ok": True, "name": name}
+
+    @app.get("/v1/skills/{name}/files")
+    async def list_skill_files_api(name: str, request: Request):
+        """List every file inside a skill package (recursive), not just SKILL.md."""
+        _check_token(request)
+        if not _SKILL_NAME_RE.match(name):
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+        resolved = _resolve_skill_dir(name)
+        if resolved is None:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        base, source = resolved
+        files = []
+        for p in sorted(base.rglob("*")):
+            if p.is_file():
+                try:
+                    size = p.stat().st_size
+                except OSError:
+                    size = 0
+                files.append({"path": p.relative_to(base).as_posix(), "size": size})
+        return {"name": name, "source": source,
+                "editable": source == "workspace", "files": files}
+
+    @app.get("/v1/skills/{name}/file")
+    async def read_skill_file_api(name: str, request: Request, path: str = Query(...)):
+        """Return the content of one file within a skill package."""
+        _check_token(request)
+        if not _SKILL_NAME_RE.match(name):
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+        resolved = _resolve_skill_dir(name)
+        if resolved is None:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        base, source = resolved
+        target = _resolve_skill_file(base, path)
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        raw = target.read_bytes()
+        try:
+            content = raw.decode("utf-8")
+            binary = False
+        except UnicodeDecodeError:
+            content, binary = "", True
+        return {"name": name, "path": path, "content": content, "binary": binary,
+                "source": source, "editable": source == "workspace"}
+
+    @app.put("/v1/skills/{name}/file")
+    async def write_skill_file_api(name: str, request: Request, body: SkillFileSaveRequest):
+        """Create or update one file inside a workspace skill package."""
+        _check_token(request)
+        if not _SKILL_NAME_RE.match(name):
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+        loader = agent.context.skills
+        ws_dir = loader.workspace_skills / name
+        target = _resolve_skill_file(ws_dir, body.path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body.content, encoding="utf-8")
+        return {"ok": True, "name": name, "path": body.path, "source": "workspace"}
+
+    @app.post("/v1/skills/{name}/copy")
+    async def copy_skill_api(name: str, request: Request):
+        """Copy a builtin skill package (all files) into the workspace for editing."""
+        _check_token(request)
+        if not _SKILL_NAME_RE.match(name):
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+        loader = agent.context.skills
+        ws_dir = loader.workspace_skills / name
+        if (ws_dir / "SKILL.md").exists():
+            return {"ok": True, "name": name, "source": "workspace"}
+        bi_dir = loader.builtin_skills / name
+        if not (bi_dir / "SKILL.md").exists():
+            raise HTTPException(status_code=404, detail="Skill not found")
+        ws_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(bi_dir, ws_dir)
+        return {"ok": True, "name": name, "source": "workspace"}
 
     # ------------------------------------------------------------------ Files
     @app.get("/v1/files")
