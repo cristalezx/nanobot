@@ -230,9 +230,14 @@ body.resizing iframe { pointer-events: none; }
 #files-breadcrumb span { cursor: pointer; color: var(--accent); }
 #files-breadcrumb span:hover { text-decoration: underline; }
 #files-list { flex: 1; overflow-y: auto; padding: 2px 0; }
+.file-twisty {
+  flex-shrink: 0; width: 12px; text-align: center; color: var(--text-faint);
+  font-size: 0.62rem; user-select: none;
+}
+.file-item.selected { background: var(--active); }
 .file-item {
-  padding: 6px 10px; cursor: pointer; font-size: 0.79rem;
-  display: flex; align-items: center; gap: 7px; color: var(--text);
+  padding: 4px 10px; cursor: pointer; font-size: 0.79rem;
+  display: flex; align-items: center; gap: 6px; color: var(--text);
   border-bottom: 1px solid var(--border-soft);
   transition: background 0.15s;
 }
@@ -1182,34 +1187,111 @@ function formatSize(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+// ── File tree (PyCharm-style, lazy-loaded) ──────────────────────────────────
+// currentFilePath = the directory selected as the upload / new-file target.
+let fileTreeExpanded = new Set(); // directory paths currently expanded
+let fileTreeCache = {};           // dir path -> listing (avoids refetch on toggle)
+let _treeSeq = 0;                 // guards against out-of-order async rebuilds
+
 function goWorkspace() {
-  loadFiles('');
+  fileTreeExpanded.clear();
+  fileTreeCache = {};
+  currentFilePath = '';
+  document.getElementById('files-path-input').value = '';
+  rebuildTree();
 }
 
-async function loadFiles(path) {
-  currentFilePath = path;
-  // Update path input
-  var pathInput = document.getElementById('files-path-input');
-  pathInput.value = path || '';
-
-  var showHidden = document.getElementById('files-hidden-toggle').checked;
+async function fetchDir(path) {
+  if (fileTreeCache[path]) return fileTreeCache[path];
   var url = '/v1/files' + (path ? '?path=' + encodeURIComponent(path) : '');
-  try {
-    var res = await apiFetch(url);
-    if (!res.ok) { renderFilesError('无法加载目录'); return; }
-    var data = await res.json();
-    if (data.type === 'file') {
-      var p = data.path || path;
-      var nm = data.name || p.split('/').pop();
-      var kind = fileKind(nm);
-      if (isEditableKind(kind)) openFileInEditor(p, data.content || '', kind);
-      else openFileInEditor(p, null, kind);
-      return;
-    }
-    renderFilesList(data, showHidden);
-  } catch (e) {
-    renderFilesError('无法加载目录：' + e.message);
+  var res = await apiFetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  var data = await res.json();
+  fileTreeCache[path] = data;
+  return data;
+}
+
+// Public entry used across the app: refresh the tree, expanding down to `path`.
+async function loadFiles(path) {
+  path = path || '';
+  fileTreeCache = {}; // force a fresh read (callers use this after writes/uploads)
+  if (path) {
+    var acc = '';
+    path.split('/').filter(Boolean).forEach(function(p) {
+      acc += (acc ? '/' : '') + p;
+      fileTreeExpanded.add(acc);
+    });
   }
+  currentFilePath = path;
+  document.getElementById('files-path-input').value = path;
+  await rebuildTree();
+}
+
+async function rebuildTree() {
+  var seq = ++_treeSeq;
+  var frag = document.createElement('div');
+  try {
+    await renderDirInto(frag, '', 0, seq);
+  } catch (e) {
+    if (seq === _treeSeq) renderFilesError('无法加载目录：' + e.message);
+    return;
+  }
+  if (seq !== _treeSeq) return; // a newer rebuild superseded this one
+  var list = document.getElementById('files-list');
+  list.innerHTML = '';
+  list.appendChild(frag);
+  updateFilesBreadcrumb();
+}
+
+async function renderDirInto(container, dirPath, depth, seq) {
+  var data = await fetchDir(dirPath);
+  if (seq !== _treeSeq) return;
+  var showHidden = document.getElementById('files-hidden-toggle').checked;
+  var entries = (data.entries || []).filter(function(e) {
+    return showHidden || !e.name.startsWith('.');
+  });
+  if (depth === 0 && entries.length === 0) {
+    var em = document.createElement('div');
+    em.style.cssText = 'padding:12px;color:var(--text-dim);font-size:0.78rem;';
+    em.textContent = '空目录';
+    container.appendChild(em);
+    return;
+  }
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    container.appendChild(makeFileRow(entry, depth));
+    if (entry.type === 'dir' && fileTreeExpanded.has(entry.path)) {
+      await renderDirInto(container, entry.path, depth + 1, seq);
+      if (seq !== _treeSeq) return;
+    }
+  }
+}
+
+function makeFileRow(entry, depth) {
+  var isDir = entry.type === 'dir';
+  var el = document.createElement('div');
+  el.className = 'file-item' + (isDir && entry.path === currentFilePath ? ' selected' : '');
+  el.style.paddingLeft = (depth * 14 + 10) + 'px';
+  var twisty = isDir ? (fileTreeExpanded.has(entry.path) ? '▾' : '▸') : '';
+  var icon = isDir ? '📁' : '📄';
+  var size = entry.type === 'file' ? formatSize(entry.size) : '';
+  el.innerHTML =
+    '<span class="file-twisty">' + twisty + '</span>' +
+    '<span class="file-icon">' + icon + '</span>' +
+    '<span class="file-name">' + escapeHtml(entry.name) + '</span>' +
+    '<span class="file-size">' + size + '</span>';
+  var p = entry.path, name = entry.name;
+  el.onclick = function() { if (isDir) toggleDir(p); else openFile(p, name); };
+  return el;
+}
+
+// Expand/collapse a directory in place (uses cache, no full refetch).
+function toggleDir(path) {
+  if (fileTreeExpanded.has(path)) fileTreeExpanded.delete(path);
+  else fileTreeExpanded.add(path);
+  currentFilePath = path; // also becomes the upload / new-file target
+  document.getElementById('files-path-input').value = path;
+  rebuildTree();
 }
 
 // Open a file (type-aware): fetch text only for editable kinds.
@@ -1230,64 +1312,12 @@ async function openFile(path, name) {
   }
 }
 
-function renderBreadcrumb(path) {
+// Show the directory that uploads / new files will be created in.
+function updateFilesBreadcrumb() {
   var bc = document.getElementById('files-breadcrumb');
-  if (!path || path === '') {
-    bc.innerHTML = '<span onclick="loadFiles(\'\')">workspace</span>';
-    return;
-  }
-  var parts = path.split('/').filter(Boolean);
-  var html = '<span onclick="loadFiles(\'\')">workspace</span>';
-  var acc = '';
-  parts.forEach(function(p) {
-    acc += (acc ? '/' : '') + p;
-    var captured = acc;
-    html += ' / <span onclick="loadFiles(\'' + escapeAttr(captured) + '\')">' + escapeHtml(p) + '</span>';
-  });
-  bc.innerHTML = html;
-}
-
-function renderFilesList(data, showHidden) {
-  renderBreadcrumb(data.path || '');
-  var list = document.getElementById('files-list');
-  list.innerHTML = '';
-
-  if (data.path) {
-    var parentPath = data.path.includes('/') ? data.path.substring(0, data.path.lastIndexOf('/')) : '';
-    var back = document.createElement('div');
-    back.className = 'file-item';
-    back.innerHTML = '<span class="file-icon">↩</span><span class="file-name">..</span>';
-    back.onclick = function() { loadFiles(parentPath); };
-    list.appendChild(back);
-  }
-
-  var entries = (data.entries || []).filter(function(e) {
-    return showHidden || !e.name.startsWith('.');
-  });
-
-  if (entries.length === 0) {
-    list.innerHTML += '<div style="padding:12px;color:#666;font-size:0.78rem;">空目录</div>';
-    return;
-  }
-
-  entries.forEach(function(entry) {
-    var el = document.createElement('div');
-    el.className = 'file-item';
-    var icon = entry.type === 'dir' ? '📁' : '📄';
-    var size = entry.type === 'file' ? formatSize(entry.size) : '';
-    el.innerHTML =
-      '<span class="file-icon">' + icon + '</span>' +
-      '<span class="file-name">' + escapeHtml(entry.name) + '</span>' +
-      '<span class="file-size">' + size + '</span>';
-    var entryPath = entry.path;
-    var entryType = entry.type;
-    var entryName = entry.name;
-    el.onclick = function() {
-      if (entryType === 'dir') loadFiles(entryPath);
-      else openFile(entryPath, entryName);
-    };
-    list.appendChild(el);
-  });
+  var label = currentFilePath ? 'workspace/' + currentFilePath : 'workspace';
+  bc.innerHTML = '<span title="上传 / 新建文件的目标目录" onclick="goWorkspace()">📁 ' +
+                 escapeHtml(label) + '</span>';
 }
 
 function renderFilesError(msg) {
@@ -1295,12 +1325,27 @@ function renderFilesError(msg) {
     '<div style="padding:12px;color:#e74c3c;font-size:0.78rem;">' + escapeHtml(msg) + '</div>';
 }
 
-// Handle path input Enter key
+// Path input: Enter opens a file or expands the tree down to a directory.
 document.getElementById('files-path-input').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') {
-    var path = e.target.value.trim();
-    loadFiles(path);
-  }
+  if (e.key !== 'Enter') return;
+  var path = e.target.value.trim();
+  (async function() {
+    try {
+      var res = await apiFetch('/v1/files' + (path ? '?path=' + encodeURIComponent(path) : ''));
+      if (!res.ok) { renderFilesError('无法加载：' + path); return; }
+      var data = await res.json();
+      if (data.type === 'file') {
+        var nm = data.name || path.split('/').pop();
+        var kind = fileKind(nm);
+        if (isEditableKind(kind)) openFileInEditor(data.path || path, data.content || '', kind);
+        else openFileInEditor(data.path || path, null, kind);
+        return;
+      }
+      loadFiles(path);
+    } catch (err) {
+      renderFilesError('无法加载：' + err.message);
+    }
+  })();
 });
 
 function newFile() {
