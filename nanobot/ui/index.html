@@ -2198,8 +2198,6 @@ function appendPush(text) {
 }
 
 // ── Streaming bubble ───────────────────────────────────────────────────────
-let _streamRenderPending = false;
-
 function streamToken(delta) {
   if (!streamBubbleEl) {
     var el = document.createElement('div');
@@ -2210,22 +2208,14 @@ function streamToken(delta) {
     streamBuffer = '';
   }
   streamBuffer += delta;
-  // Render markdown in real-time, batched to one DOM write per animation frame.
-  if (!_streamRenderPending) {
-    _streamRenderPending = true;
-    requestAnimationFrame(function() {
-      _streamRenderPending = false;
-      if (streamBubbleEl) {
-        streamBubbleEl.innerHTML = renderMarkdown(streamBuffer);
-        scrollBottom();
-      }
-    });
-  }
+  // Plain text while streaming — no partial-markdown layout jitter.
+  // Full markdown renders once on streamFinalize when the turn completes.
+  streamBubbleEl.textContent = streamBuffer;
+  scrollBottom();
 }
 
 // Turn turned out to be a tool-call preamble — discard the live partial.
 function streamCancel() {
-  _streamRenderPending = false;
   if (streamBubbleEl) {
     var msgEl = streamBubbleEl.closest('.msg');
     if (msgEl) msgEl.remove();
