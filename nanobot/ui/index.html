@@ -2045,8 +2045,9 @@ function connect() {
       collapseCurrentSteps();
       // If we streamed this answer live, finalize that bubble; else append fresh.
       if (!streamFinalize(msg.content)) appendBot(msg.content);
-      // Render clickable chips for every file the agent wrote this turn.
-      appendFileChips(filesWrittenThisTurn.slice());
+      // Build chip list: message-mentioned paths first (they're the real outputs),
+      // then any explicit write_file paths not already covered.
+      appendFileChips(mergeFilePaths(msg.content || '', filesWrittenThisTurn));
       filesWrittenThisTurn = [];
       setBusy(false);
       loadSessionList();
@@ -2197,6 +2198,8 @@ function appendPush(text) {
 }
 
 // ── Streaming bubble ───────────────────────────────────────────────────────
+let _streamRenderPending = false;
+
 function streamToken(delta) {
   if (!streamBubbleEl) {
     var el = document.createElement('div');
@@ -2207,12 +2210,22 @@ function streamToken(delta) {
     streamBuffer = '';
   }
   streamBuffer += delta;
-  streamBubbleEl.textContent = streamBuffer;  // plain while streaming (no partial-markdown flicker)
-  scrollBottom();
+  // Render markdown in real-time, batched to one DOM write per animation frame.
+  if (!_streamRenderPending) {
+    _streamRenderPending = true;
+    requestAnimationFrame(function() {
+      _streamRenderPending = false;
+      if (streamBubbleEl) {
+        streamBubbleEl.innerHTML = renderMarkdown(streamBuffer);
+        scrollBottom();
+      }
+    });
+  }
 }
 
 // Turn turned out to be a tool-call preamble — discard the live partial.
 function streamCancel() {
+  _streamRenderPending = false;
   if (streamBubbleEl) {
     var msgEl = streamBubbleEl.closest('.msg');
     if (msgEl) msgEl.remove();
@@ -2370,6 +2383,34 @@ function finalizeCurrentSteps() {
 
 function collapseCurrentSteps() {
   finalizeCurrentSteps();
+}
+
+// Extract backtick-quoted file paths from the bot message text.
+// Agent always mentions the important output files; this is more reliable
+// than tracking every write_file call (which includes intermediate scripts).
+function extractFilePathsFromText(text) {
+  var result = [], seen = new Set();
+  // Match `path/to/file.ext` or `filename.ext` — relative, with an extension.
+  var re = /`([a-zA-Z0-9_.\-\/]+\.[a-zA-Z0-9]{1,8})`/g, m;
+  while ((m = re.exec(text)) !== null) {
+    var p = m[1];
+    if (!p.startsWith('/') && p.length < 150 && !seen.has(p)) {
+      seen.add(p); result.push(p);
+    }
+  }
+  return result;
+}
+
+// Merge: message-mentioned paths first, then any write_file paths not already present.
+function mergeFilePaths(messageText, writtenPaths) {
+  var seen = new Set(), out = [];
+  extractFilePathsFromText(messageText).forEach(function(p) {
+    if (!seen.has(p)) { seen.add(p); out.push(p); }
+  });
+  writtenPaths.forEach(function(p) {
+    if (!seen.has(p)) { seen.add(p); out.push(p); }
+  });
+  return out;
 }
 
 // Render clickable file chips below the most-recent bot response.
