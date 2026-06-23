@@ -188,6 +188,12 @@ body.resizing iframe { pointer-events: none; }
 .session-action-btn:hover { color: var(--danger); background: rgba(231,76,60,.12); }
 .session-action-btn.export:hover { color: var(--success); background: rgba(39,174,96,.12); }
 .session-action-btn.share:hover { color: var(--accent); background: var(--accent-soft); }
+.ses-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: transparent;
+}
+.ses-dot.busy { background: var(--accent); animation: ses-pulse 1.2s ease-in-out infinite; }
+.ses-dot.unread { background: var(--success); }
+@keyframes ses-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* ── Files Panel ── */
 #files-toolbar {
@@ -229,6 +235,12 @@ body.resizing iframe { pointer-events: none; }
 }
 #files-breadcrumb span { cursor: pointer; color: var(--accent); }
 #files-breadcrumb span:hover { text-decoration: underline; }
+#files-search-bar { padding: 5px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#files-search {
+  width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 5px 9px; font-size: 0.78rem; outline: none;
+}
+#files-search:focus { border-color: var(--accent); }
 #files-list { flex: 1; overflow-y: auto; padding: 2px 0; }
 .file-twisty {
   flex-shrink: 0; width: 12px; text-align: center; color: var(--text-faint);
@@ -342,8 +354,10 @@ body.resizing iframe { pointer-events: none; }
 }
 #chat {
   flex: 1; overflow-y: auto;
+}
+.chat-session {
+  display: flex; flex-direction: column; gap: 16px; min-height: 100%;
   padding: 24px max(16px, calc((100% - 820px) / 2));
-  display: flex; flex-direction: column; gap: 16px;
 }
 
 /* ── Message bubbles ── */
@@ -751,6 +765,9 @@ body.resizing iframe { pointer-events: none; }
         </div>
       </div>
       <div id="files-breadcrumb"></div>
+      <div id="files-search-bar">
+        <input id="files-search" type="text" placeholder="搜索文件名…" oninput="filterFileTree(this.value)" autocomplete="off">
+      </div>
       <div id="files-list"></div>
     </div>
 
@@ -818,27 +835,42 @@ if (typeof mermaid !== 'undefined') {
 let _mermaidSeq = 0;
 
 // ── Global state ──────────────────────────────────────────────────────────
-let ws = null;
-let busy = false;
-let typingEl = null;
+// currentSessionId: the session being processed (temporarily changes during WS routing)
+// activeSessionId:  the session visible to the user (never changes during routing)
 let currentSessionId = 'default';
+let activeSessionId  = 'default';
 let authToken = sessionStorage.getItem('nanobotToken') || '';
 
-// Steps tracking
-let currentStepsGroup = null;
-let stepsCounter = 0;
-let toolsUsed = [];
-let skillsUsed = [];
-// Files written by the agent during the current turn (shown as clickable chips).
-let filesWrittenThisTurn = [];
-
-// Streaming state (live token-by-token bubble)
-let streamBubbleEl = null;   // the live .bubble element
-let streamBuffer = '';       // accumulated raw text
+// Per-session state lives in sesStore — see getSes().
 
 // File browser state
 let currentFilePath = '';
 let allSessions = [];
+
+// ── Per-session store ─────────────────────────────────────────────────────
+const sesStore = new Map();
+
+function getSes(sid) {
+  if (!sesStore.has(sid)) {
+    var el = document.createElement('div');
+    el.className = 'chat-session';
+    el.id = 'chat-ses-' + sid;
+    el.style.display = 'none';
+    chat.appendChild(el);
+    sesStore.set(sid, {
+      ws: null, busy: false, unread: false, chatEl: el,
+      typingEl: null, streamBubbleEl: null, streamBuffer: '',
+      currentStepsGroup: null, stepsCounter: 0,
+      toolsUsed: [], skillsUsed: [], filesWrittenThisTurn: []
+    });
+  }
+  return sesStore.get(sid);
+}
+
+// Append el to the chat div of the session currently being processed.
+function chatAppend(el) {
+  getSes(currentSessionId).chatEl.appendChild(el);
+}
 
 // Editor state
 // Map<path, {content: string, originalContent: string, dirty: bool}>
@@ -1008,9 +1040,11 @@ document.getElementById('auth-password').addEventListener('keydown', function(e)
 });
 
 function init() {
+  var s = getSes(activeSessionId);
+  s.chatEl.style.display = '';   // make the default session visible
   loadSessionList();
   loadModels();
-  loadHistory(currentSessionId).then(function() { connect(); });
+  loadHistory(activeSessionId).then(function() { connectSession(activeSessionId); });
 }
 
 // ── Model switching ────────────────────────────────────────────────────────
@@ -1107,10 +1141,14 @@ function renderSessionList(sessions) {
   }
   sessions.forEach(function(s) {
     var sid = s.key.replace('web:', '');
+    var sesData = sesStore.get(sid);
+    var dotClass = 'ses-dot' + (sesData && sesData.busy ? ' busy' : sesData && sesData.unread ? ' unread' : '');
     var el = document.createElement('div');
-    el.className = 'session-item' + (sid === currentSessionId ? ' active' : '');
+    el.className = 'session-item' + (sid === activeSessionId ? ' active' : '');
+    el.dataset.sid = sid;
     var updatedAt = s.updated_at ? new Date(s.updated_at).toLocaleString('zh-CN') : '';
     el.innerHTML =
+      '<span class="' + dotClass + '"></span>' +
       '<div class="session-item-info" onclick="switchSession(\'' + escapeHtml(sid) + '\')">' +
         '<span class="session-name">' + escapeHtml(sid) + '</span>' +
         '<span class="session-time">' + updatedAt + '</span>' +
@@ -1124,17 +1162,50 @@ function renderSessionList(sessions) {
   });
 }
 
+function updateSessionDot(sid) {
+  var item = sessionList.querySelector('[data-sid="' + escapeAttr(sid) + '"]');
+  if (!item) return;
+  var dotEl = item.querySelector('.ses-dot');
+  if (!dotEl) return;
+  var s = sesStore.get(sid);
+  dotEl.className = 'ses-dot' + (s && s.busy ? ' busy' : s && s.unread ? ' unread' : '');
+}
+
 function switchSession(sid) {
+  if (sid === activeSessionId) return;
+
+  // Hide the old session's chat div
+  var prevSes = sesStore.get(activeSessionId);
+  if (prevSes) {
+    prevSes.chatEl.style.display = 'none';
+    prevSes.unread = false;
+  }
+
+  activeSessionId = sid;
   currentSessionId = sid;
   sessInput.value = sid;
-  if (ws) ws.close();
-  chat.innerHTML = '';
-  currentStepsGroup = null;
-  stepsCounter = 0;
-  toolsUsed = [];
-  skillsUsed = [];
-  loadHistory(sid).then(function() { connect(); });
+
+  var s = getSes(sid);
+  s.chatEl.style.display = '';
+  s.unread = false;
+
+  // Update header WS dot and send button to reflect new session
+  dot.className = (s.ws && s.ws.readyState === WebSocket.OPEN) ? 'connected' : '';
+  sendBtn.disabled = s.busy;
+
+  // Scroll to bottom of newly visible session
+  chat.scrollTop = chat.scrollHeight;
+
   updateActiveSession();
+
+  // Connect if not already open
+  if (!s.ws || s.ws.readyState === WebSocket.CLOSED || s.ws.readyState === WebSocket.CLOSING) {
+    if (!s.chatEl.firstChild) {
+      loadHistory(sid).then(function() { connectSession(sid); });
+    } else {
+      connectSession(sid);
+    }
+  }
 }
 
 function createAndSwitch() {
@@ -1146,15 +1217,22 @@ function createAndSwitch() {
 function updateActiveSession() {
   document.querySelectorAll('.session-item').forEach(function(el) {
     var nameEl = el.querySelector('.session-name');
-    if (nameEl) el.classList.toggle('active', nameEl.textContent === currentSessionId);
+    if (nameEl) el.classList.toggle('active', nameEl.textContent === activeSessionId);
   });
 }
 
 async function deleteSession(sid, e) {
   e.stopPropagation();
   await apiFetch('/v1/sessions/web:' + encodeURIComponent(sid), { method: 'DELETE' });
-  if (sid === currentSessionId) {
+  if (sid === activeSessionId) {
     switchSession('default');
+  } else {
+    var s = sesStore.get(sid);
+    if (s) {
+      if (s.ws) { s.ws.onclose = null; try { s.ws.close(); } catch(_) {} }
+      if (s.chatEl && s.chatEl.parentNode) s.chatEl.parentNode.removeChild(s.chatEl);
+      sesStore.delete(sid);
+    }
   }
   loadSessionList();
 }
@@ -1978,104 +2056,142 @@ async function loadHistory(sid) {
     var messages = data.messages || [];
     if (messages.length === 0) return;
 
+    var chatEl = getSes(sid).chatEl;
     var divider = document.createElement('div');
     divider.className = 'history-divider';
     divider.textContent = '── 历史记录 (' + messages.length + ' 条) ──';
-    chat.appendChild(divider);
+    chatEl.appendChild(divider);
 
     messages.forEach(function(m) {
-      if (m.role === 'user') appendUser(m.content, true);
-      else if (m.role === 'assistant') appendBot(m.content, true);
+      var el = document.createElement('div');
+      if (m.role === 'user') {
+        el.className = 'msg user';
+        el.style.opacity = '0.85';
+        el.innerHTML = '<div class="avatar">👤</div><div class="bubble">' +
+          escapeHtml(m.content).replace(/\n/g, '<br>') + '</div>';
+        chatEl.appendChild(el);
+      } else if (m.role === 'assistant') {
+        el.className = 'msg bot';
+        el.style.opacity = '0.85';
+        el.innerHTML = '<div class="avatar">🐕</div><div class="bubble">' +
+          renderMarkdown(m.content) + '</div>';
+        chatEl.appendChild(el);
+        enhanceBubble(el.querySelector('.bubble'));
+      }
     });
 
     var endDivider = document.createElement('div');
     endDivider.className = 'history-divider';
     endDivider.textContent = '── 历史记录结束 ──';
-    chat.appendChild(endDivider);
-    scrollBottom();
+    chatEl.appendChild(endDivider);
+    if (sid === activeSessionId) chat.scrollTop = chat.scrollHeight;
   } catch (e) {
     console.error('Failed to load history:', e);
   }
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────────
-function connect() {
-  var sid = currentSessionId;
-  ws = new WebSocket(wsUrl(sid));
+function connectSession(sid) {
+  var s = getSes(sid);
+  if (s.ws && (s.ws.readyState === WebSocket.CONNECTING || s.ws.readyState === WebSocket.OPEN)) return;
 
-  ws.onopen = function() {
-    dot.className = 'connected';
-    appendSystem('已连接到会话「' + sid + '」');
+  var wsInst = new WebSocket(wsUrl(sid));
+  s.ws = wsInst;
+
+  wsInst.onopen = function() {
+    if (s.ws !== wsInst) return; // superseded by a newer connection
+    if (sid === activeSessionId) dot.className = 'connected';
+    updateSessionDot(sid);
+    var sysEl = document.createElement('div');
+    sysEl.className = 'history-divider';
+    sysEl.textContent = 'i 已连接到会话「' + sid + '」';
+    s.chatEl.appendChild(sysEl);
+    if (sid === activeSessionId) chat.scrollTop = chat.scrollHeight;
     loadSessionList();
   };
 
-  ws.onclose = function() {
-    dot.className = '';
-    streamFinalize();  // keep whatever streamed so far; drop the caret
-    setBusy(false);
-    appendSystem('连接断开，5 秒后重连…');
-    setTimeout(connect, 5000);
-  };
-
-  ws.onerror = function() { ws.close(); };
-
-  ws.onmessage = function(e) {
-    var msg = JSON.parse(e.data);
-    if (msg.type === 'token') {
-      removeTyping();
-      streamToken(msg.content);
-    } else if (msg.type === 'token_cancel') {
-      streamCancel();
-    } else if (msg.type === 'progress') {
-      removeTyping();
-      appendStep(msg.content, false);
-    } else if (msg.type === 'tool') {
-      removeTyping();
-      appendStep(msg.content, true);
-    } else if (msg.type === 'skill') {
-      removeTyping();
-      appendSkillUsed(msg.content);
-    } else if (msg.type === 'approval_request') {
-      removeTyping();
-      appendApprovalRequest(msg.id, msg.command, msg.reason);
-    } else if (msg.type === 'file_written') {
-      filesWrittenThisTurn.push(msg.content);
-    } else if (msg.type === 'message') {
-      removeTyping();
-      collapseCurrentSteps();
-      // If we streamed this answer live, finalize that bubble; else append fresh.
-      if (!streamFinalize(msg.content)) appendBot(msg.content);
-      // Build chip list: message-mentioned paths first (they're the real outputs),
-      // then any explicit write_file paths not already covered.
-      appendFileChips(mergeFilePaths(msg.content || '', filesWrittenThisTurn));
-      filesWrittenThisTurn = [];
-      setBusy(false);
-      loadSessionList();
-    } else if (msg.type === 'push') {
-      removeTyping();
-      collapseCurrentSteps();
-      streamCancel();  // discard any dangling live partial
-      appendPush(msg.content);
-      setBusy(false);
+  wsInst.onclose = function() {
+    if (s.ws !== wsInst) return;
+    if (sid === activeSessionId) { dot.className = ''; sendBtn.disabled = false; }
+    // Finalize any in-progress stream for this session
+    if (s.streamBubbleEl) {
+      s.streamBubbleEl.classList.remove('streaming');
+      s.streamBubbleEl.innerHTML = renderMarkdown(s.streamBuffer);
+      enhanceBubble(s.streamBubbleEl);
+      s.streamBubbleEl = null; s.streamBuffer = '';
     }
+    s.busy = false;
+    updateSessionDot(sid);
+    var sysEl = document.createElement('div');
+    sysEl.className = 'history-divider';
+    sysEl.textContent = 'i 连接断开，5 秒后重连…';
+    s.chatEl.appendChild(sysEl);
+    if (sid === activeSessionId) chat.scrollTop = chat.scrollHeight;
+    setTimeout(function() { connectSession(sid); }, 5000);
   };
+
+  wsInst.onerror = function() { wsInst.close(); };
+
+  wsInst.onmessage = function(e) {
+    var msg; try { msg = JSON.parse(e.data); } catch(_) { return; }
+    routeMessage(sid, msg);
+  };
+}
+
+function routeMessage(sid, msg) {
+  var prevSid = currentSessionId;
+  currentSessionId = sid;
+  var s = getSes(sid);
+  var isBackground = (sid !== activeSessionId);
+
+  if (msg.type === 'token') {
+    removeTyping(); streamToken(msg.content);
+  } else if (msg.type === 'token_cancel') {
+    streamCancel();
+  } else if (msg.type === 'progress') {
+    removeTyping(); appendStep(msg.content, false);
+  } else if (msg.type === 'tool') {
+    removeTyping(); appendStep(msg.content, true);
+  } else if (msg.type === 'skill') {
+    removeTyping(); appendSkillUsed(msg.content);
+  } else if (msg.type === 'approval_request') {
+    removeTyping(); appendApprovalRequest(msg.id, msg.command, msg.reason);
+  } else if (msg.type === 'file_written') {
+    s.filesWrittenThisTurn.push(msg.content);
+  } else if (msg.type === 'message') {
+    removeTyping();
+    collapseCurrentSteps();
+    if (!streamFinalize(msg.content)) appendBot(msg.content);
+    appendFileChips(mergeFilePaths(msg.content || '', s.filesWrittenThisTurn));
+    s.filesWrittenThisTurn = [];
+    setBusy(false);
+    if (isBackground) { s.unread = true; updateSessionDot(sid); }
+    loadSessionList();
+  } else if (msg.type === 'push') {
+    removeTyping(); collapseCurrentSteps(); streamCancel();
+    appendPush(msg.content);
+    setBusy(false);
+  }
+
+  currentSessionId = prevSid;
 }
 
 // ── Send ───────────────────────────────────────────────────────────────────
 function sendMessage() {
   var text = input.value.trim();
-  if (!text || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
+  var s = getSes(activeSessionId);
+  if (!text || s.busy || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
   appendUser(text);
-  ws.send(JSON.stringify({ content: text }));
+  s.ws.send(JSON.stringify({ content: text }));
   input.value = '';
   input.style.height = '';
-  currentStepsGroup = null;
-  stepsCounter = 0;
-  toolsUsed = [];
-  skillsUsed = [];
-  filesWrittenThisTurn = [];
-  streamBubbleEl = null;
-  streamBuffer = '';
+  s.currentStepsGroup = null;
+  s.stepsCounter = 0;
+  s.toolsUsed = [];
+  s.skillsUsed = [];
+  s.filesWrittenThisTurn = [];
+  s.streamBubbleEl = null;
+  s.streamBuffer = '';
   showTyping();
   setBusy(true);
 }
@@ -2090,12 +2206,13 @@ input.addEventListener('input', function() {
 
 // ── Session clear ──────────────────────────────────────────────────────────
 async function clearSession() {
-  var sid = currentSessionId;
+  var sid = activeSessionId;
   await apiFetch('/v1/sessions/web:' + encodeURIComponent(sid), { method: 'DELETE' });
-  chat.innerHTML = '';
-  currentStepsGroup = null;
-  stepsCounter = 0;
-  toolsUsed = [];
+  var s = getSes(sid);
+  s.chatEl.innerHTML = '';
+  s.currentStepsGroup = null; s.stepsCounter = 0;
+  s.toolsUsed = []; s.skillsUsed = [];
+  s.filesWrittenThisTurn = []; s.streamBubbleEl = null; s.streamBuffer = '';
   appendSystem('会话「' + sid + '」已清除');
   loadSessionList();
 }
@@ -2117,12 +2234,13 @@ async function triggerHeartbeat() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function setBusy(v) {
-  busy = v;
-  sendBtn.disabled = v;
+  getSes(currentSessionId).busy = v;
+  if (currentSessionId === activeSessionId) sendBtn.disabled = v;
+  updateSessionDot(currentSessionId);
 }
 
 function scrollBottom() {
-  chat.scrollTop = chat.scrollHeight;
+  if (currentSessionId === activeSessionId) chat.scrollTop = chat.scrollHeight;
 }
 
 function renderMarkdown(md) {
@@ -2170,7 +2288,7 @@ function appendUser(text, isHistory) {
   el.innerHTML =
     '<div class="avatar">👤</div>' +
     '<div class="bubble">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div>';
-  chat.appendChild(el);
+  chatAppend(el);
   if (!isHistory) scrollBottom();
 }
 
@@ -2181,7 +2299,7 @@ function appendBot(text, isHistory) {
   el.innerHTML =
     '<div class="avatar">🐕</div>' +
     '<div class="bubble">' + renderMarkdown(text) + '</div>';
-  chat.appendChild(el);
+  chatAppend(el);
   enhanceBubble(el.querySelector('.bubble'));
   if (!isHistory) scrollBottom();
 }
@@ -2192,46 +2310,45 @@ function appendPush(text) {
   el.innerHTML =
     '<div class="avatar">🔔</div>' +
     '<div class="bubble"><strong>系统通知</strong><br>' + renderMarkdown(text) + '</div>';
-  chat.appendChild(el);
+  chatAppend(el);
   enhanceBubble(el.querySelector('.bubble'));
   scrollBottom();
 }
 
 // ── Streaming bubble ───────────────────────────────────────────────────────
 function streamToken(delta) {
-  if (!streamBubbleEl) {
+  var s = getSes(currentSessionId);
+  if (!s.streamBubbleEl) {
     var el = document.createElement('div');
     el.className = 'msg bot';
     el.innerHTML = '<div class="avatar">🐕</div><div class="bubble streaming"></div>';
-    chat.appendChild(el);
-    streamBubbleEl = el.querySelector('.bubble');
-    streamBuffer = '';
+    chatAppend(el);
+    s.streamBubbleEl = el.querySelector('.bubble');
+    s.streamBuffer = '';
   }
-  streamBuffer += delta;
-  // Plain text while streaming — no partial-markdown layout jitter.
-  // Full markdown renders once on streamFinalize when the turn completes.
-  streamBubbleEl.textContent = streamBuffer;
+  s.streamBuffer += delta;
+  s.streamBubbleEl.textContent = s.streamBuffer;
   scrollBottom();
 }
 
-// Turn turned out to be a tool-call preamble — discard the live partial.
 function streamCancel() {
-  if (streamBubbleEl) {
-    var msgEl = streamBubbleEl.closest('.msg');
+  var s = getSes(currentSessionId);
+  if (s.streamBubbleEl) {
+    var msgEl = s.streamBubbleEl.closest('.msg');
     if (msgEl) msgEl.remove();
   }
-  streamBubbleEl = null;
-  streamBuffer = '';
+  s.streamBubbleEl = null;
+  s.streamBuffer = '';
 }
 
-// Finalize the live bubble with canonical markdown. Returns true if one existed.
 function streamFinalize(finalText) {
-  if (!streamBubbleEl) return false;
-  streamBubbleEl.classList.remove('streaming');
-  streamBubbleEl.innerHTML = renderMarkdown(finalText != null ? finalText : streamBuffer);
-  enhanceBubble(streamBubbleEl);
-  streamBubbleEl = null;
-  streamBuffer = '';
+  var s = getSes(currentSessionId);
+  if (!s.streamBubbleEl) return false;
+  s.streamBubbleEl.classList.remove('streaming');
+  s.streamBubbleEl.innerHTML = renderMarkdown(finalText != null ? finalText : s.streamBuffer);
+  enhanceBubble(s.streamBubbleEl);
+  s.streamBubbleEl = null;
+  s.streamBuffer = '';
   scrollBottom();
   return true;
 }
@@ -2250,13 +2367,14 @@ function appendApprovalRequest(id, command, reason) {
       '<button class="btn danger" onclick="respondApproval(\'' + escapeAttr(id) + '\', false)">拒绝</button>' +
       '<button class="btn" onclick="respondApproval(\'' + escapeAttr(id) + '\', true)">批准执行</button>' +
     '</div>';
-  chat.appendChild(el);
+  chatAppend(el);
   scrollBottom();
 }
 
 function respondApproval(id, approved) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'approval_response', id: id, approved: approved }));
+  var activeSes = getSes(activeSessionId);
+  if (activeSes.ws && activeSes.ws.readyState === WebSocket.OPEN) {
+    activeSes.ws.send(JSON.stringify({ type: 'approval_response', id: id, approved: approved }));
   }
   var card = document.getElementById('approval-' + id);
   if (card) {
@@ -2273,13 +2391,14 @@ function appendSystem(text) {
   var el = document.createElement('div');
   el.className = 'history-divider';
   el.textContent = 'i ' + text;
-  chat.appendChild(el);
+  chatAppend(el);
   scrollBottom();
 }
 
 // ── Collapsible steps ──────────────────────────────────────────────────────
 function ensureStepsGroup() {
-  if (currentStepsGroup) return currentStepsGroup;
+  var s = getSes(currentSessionId);
+  if (s.currentStepsGroup) return s.currentStepsGroup;
 
   var group = document.createElement('div');
   group.className = 'steps-group running';
@@ -2297,9 +2416,9 @@ function ensureStepsGroup() {
 
   group.appendChild(toggle);
   group.appendChild(content);
-  chat.appendChild(group);
-  currentStepsGroup = group;
-  stepsCounter = 0;
+  chatAppend(group);
+  s.currentStepsGroup = group;
+  s.stepsCounter = 0;
   return group;
 }
 
@@ -2309,15 +2428,16 @@ function extractToolName(text) {
 }
 
 function updateToggleChips(group) {
+  var s = getSes(currentSessionId);
   var chipsEl = group.querySelector('.tool-chips');
   chipsEl.innerHTML = '';
-  skillsUsed.forEach(function(name) {
+  s.skillsUsed.forEach(function(name) {
     var chip = document.createElement('span');
     chip.className = 'skill-chip';
     chip.textContent = '✦ ' + name;
     chipsEl.appendChild(chip);
   });
-  toolsUsed.forEach(function(name) {
+  s.toolsUsed.forEach(function(name) {
     var chip = document.createElement('span');
     chip.className = 'tool-chip';
     chip.textContent = name;
@@ -2326,12 +2446,14 @@ function updateToggleChips(group) {
 }
 
 function appendSkillUsed(skillName) {
-  if (!skillsUsed.includes(skillName)) skillsUsed.push(skillName);
+  var s = getSes(currentSessionId);
+  if (!s.skillsUsed.includes(skillName)) s.skillsUsed.push(skillName);
   var group = ensureStepsGroup();
   updateToggleChips(group);
 }
 
 function appendStep(text, isTool) {
+  var s = getSes(currentSessionId);
   var group = ensureStepsGroup();
   var content = group.querySelector('.steps-content');
 
@@ -2339,36 +2461,37 @@ function appendStep(text, isTool) {
   el.className = 'step-item ' + (isTool ? 'tool' : 'progress');
   el.textContent = isTool ? ('⚙ ' + text) : ('💭 ' + text.slice(0, 400));
   content.appendChild(el);
-  stepsCounter++;
+  s.stepsCounter++;
 
   if (isTool) {
     var toolName = extractToolName(text);
-    if (toolName && !toolsUsed.includes(toolName)) toolsUsed.push(toolName);
+    if (toolName && !s.toolsUsed.includes(toolName)) s.toolsUsed.push(toolName);
     updateToggleChips(group);
   }
 
   var summary = group.querySelector('.step-summary');
-  summary.textContent = '思考中… (' + stepsCounter + ' 步)';
+  summary.textContent = '思考中… (' + s.stepsCounter + ' 步)';
   content.style.maxHeight = (content.scrollHeight + 40) + 'px';
   scrollBottom();
 }
 
 function finalizeCurrentSteps() {
-  if (!currentStepsGroup) return;
-  var group = currentStepsGroup;
+  var s = getSes(currentSessionId);
+  if (!s.currentStepsGroup) return;
+  var group = s.currentStepsGroup;
   group.classList.remove('running');
 
   var summary = group.querySelector('.step-summary');
   var parts = [];
-  if (skillsUsed.length) parts.push(skillsUsed.length + ' 个技能');
-  if (toolsUsed.length) parts.push(toolsUsed.length + ' 个工具');
+  if (s.skillsUsed.length) parts.push(s.skillsUsed.length + ' 个技能');
+  if (s.toolsUsed.length) parts.push(s.toolsUsed.length + ' 个工具');
   var toolLabel = parts.length ? '使用了 ' + parts.join(' · ') : '纯推理';
-  summary.textContent = '✅ 完成 · ' + stepsCounter + ' 步 · ' + toolLabel;
+  summary.textContent = '✅ 完成 · ' + s.stepsCounter + ' 步 · ' + toolLabel;
 
-  currentStepsGroup = null;
-  stepsCounter = 0;
-  toolsUsed = [];
-  skillsUsed = [];
+  s.currentStepsGroup = null;
+  s.stepsCounter = 0;
+  s.toolsUsed = [];
+  s.skillsUsed = [];
 }
 
 function collapseCurrentSteps() {
@@ -2416,26 +2539,27 @@ function appendFileChips(paths) {
     chip.innerHTML = '📄 ' + escapeHtml(name);
     chip.onclick = function() {
       openFile(p, name);
-      // Switch to files tab so the tree refreshes to show context.
       if (document.getElementById('panel-files').classList.contains('active')) return;
       switchSidebarTab('files');
     };
     row.appendChild(chip);
   });
-  chat.appendChild(row);
+  chatAppend(row);
   scrollBottom();
 }
 
 function showTyping() {
-  typingEl = document.createElement('div');
-  typingEl.className = 'typing';
-  typingEl.innerHTML = '<span></span><span></span><span></span>';
-  chat.appendChild(typingEl);
+  var s = getSes(currentSessionId);
+  s.typingEl = document.createElement('div');
+  s.typingEl.className = 'typing';
+  s.typingEl.innerHTML = '<span></span><span></span><span></span>';
+  chatAppend(s.typingEl);
   scrollBottom();
 }
 
 function removeTyping() {
-  if (typingEl) { typingEl.remove(); typingEl = null; }
+  var s = getSes(currentSessionId);
+  if (s.typingEl) { s.typingEl.remove(); s.typingEl = null; }
 }
 
 function escapeHtml(t) {
@@ -2448,6 +2572,64 @@ function escapeHtml(t) {
 
 function escapeAttr(t) {
   return String(t).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+}
+
+// ── File search ────────────────────────────────────────────────────────────
+async function filterFileTree(q) {
+  q = (q || '').trim().toLowerCase();
+  if (!q) { rebuildTree(); return; }
+  var list = document.getElementById('files-list');
+  list.innerHTML = '<div style="padding:8px 12px;color:var(--text-dim);font-size:0.78rem;">搜索中…</div>';
+  try {
+    var allFiles = await collectAllFiles('', 0);
+    var matches = allFiles.filter(function(f) {
+      return f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q);
+    });
+    list.innerHTML = '';
+    if (!matches.length) {
+      list.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:0.78rem;">未找到匹配文件</div>';
+      return;
+    }
+    var frag = document.createDocumentFragment();
+    matches.forEach(function(f) {
+      var el = document.createElement('div');
+      el.className = 'file-item';
+      el.style.paddingLeft = '10px';
+      el.innerHTML =
+        '<span class="file-twisty"></span>' +
+        '<span class="file-icon">📄</span>' +
+        '<span class="file-name" title="' + escapeAttr(f.path) + '">' + escapeHtml(f.path) + '</span>' +
+        '<span class="file-size">' + formatSize(f.size) + '</span>';
+      var p = f.path, name = f.name;
+      el.onclick = function() { openFile(p, name); };
+      frag.appendChild(el);
+    });
+    list.appendChild(frag);
+  } catch (e) {
+    list.innerHTML = '<div style="padding:12px;color:#e74c3c;font-size:0.78rem;">搜索失败：' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function collectAllFiles(dirPath, depth) {
+  if (depth > 8) return [];
+  try {
+    var data = await fetchDir(dirPath);
+    var showHidden = document.getElementById('files-hidden-toggle').checked;
+    var entries = (data.entries || []).filter(function(e) {
+      return showHidden || !e.name.startsWith('.');
+    });
+    var result = [];
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (e.type === 'file') {
+        result.push(e);
+      } else if (e.type === 'dir') {
+        var sub = await collectAllFiles(e.path, depth + 1);
+        result = result.concat(sub);
+      }
+    }
+    return result;
+  } catch (_) { return []; }
 }
 
 // ── Start ──────────────────────────────────────────────────────────────────
