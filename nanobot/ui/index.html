@@ -469,6 +469,23 @@ body.resizing iframe { pointer-events: none; }
   border-left: 3px solid var(--accent); border-radius: 0 9px 9px 0; padding-left: 8px;
 }
 
+/* ── File chips (files written by agent this turn) ── */
+.file-chips-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 2px 16px 10px calc(40px + 16px);
+}
+.file-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid rgba(92,92,255,.22); border-radius: 7px;
+  padding: 4px 11px 4px 9px; font-size: 0.75rem; cursor: pointer;
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  white-space: nowrap; max-width: 260px;
+  overflow: hidden; text-overflow: ellipsis;
+  transition: background 0.13s;
+}
+.file-chip:hover { background: var(--active); border-color: var(--accent); }
+
 /* ── Typing indicator ── */
 .typing {
   align-self: flex-start; display: flex; gap: 5px; padding: 11px 15px;
@@ -812,6 +829,8 @@ let currentStepsGroup = null;
 let stepsCounter = 0;
 let toolsUsed = [];
 let skillsUsed = [];
+// Files written by the agent during the current turn (shown as clickable chips).
+let filesWrittenThisTurn = [];
 
 // Streaming state (live token-by-token bubble)
 let streamBubbleEl = null;   // the live .bubble element
@@ -2019,11 +2038,16 @@ function connect() {
     } else if (msg.type === 'approval_request') {
       removeTyping();
       appendApprovalRequest(msg.id, msg.command, msg.reason);
+    } else if (msg.type === 'file_written') {
+      filesWrittenThisTurn.push(msg.content);
     } else if (msg.type === 'message') {
       removeTyping();
       collapseCurrentSteps();
       // If we streamed this answer live, finalize that bubble; else append fresh.
       if (!streamFinalize(msg.content)) appendBot(msg.content);
+      // Render clickable chips for every file the agent wrote this turn.
+      appendFileChips(filesWrittenThisTurn.slice());
+      filesWrittenThisTurn = [];
       setBusy(false);
       loadSessionList();
     } else if (msg.type === 'push') {
@@ -2048,6 +2072,7 @@ function sendMessage() {
   stepsCounter = 0;
   toolsUsed = [];
   skillsUsed = [];
+  filesWrittenThisTurn = [];
   streamBubbleEl = null;
   streamBuffer = '';
   showTyping();
@@ -2345,6 +2370,29 @@ function finalizeCurrentSteps() {
 
 function collapseCurrentSteps() {
   finalizeCurrentSteps();
+}
+
+// Render clickable file chips below the most-recent bot response.
+function appendFileChips(paths) {
+  if (!paths.length) return;
+  var row = document.createElement('div');
+  row.className = 'file-chips-row';
+  paths.forEach(function(p) {
+    var chip = document.createElement('span');
+    chip.className = 'file-chip';
+    chip.title = p;
+    var name = p.split('/').pop();
+    chip.innerHTML = '📄 ' + escapeHtml(name);
+    chip.onclick = function() {
+      openFile(p, name);
+      // Switch to files tab so the tree refreshes to show context.
+      if (document.getElementById('panel-files').classList.contains('active')) return;
+      switchSidebarTab('files');
+    };
+    row.appendChild(chip);
+  });
+  chat.appendChild(row);
+  scrollBottom();
 }
 
 function showTyping() {

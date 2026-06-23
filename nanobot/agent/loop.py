@@ -276,6 +276,20 @@ class AgentLoop:
                     result = await self.tools.execute(
                         tool_call.name, tool_call.arguments, approval_cb=on_approval
                     )
+                    # Notify the client which file was just created/modified.
+                    if on_progress and tool_call.name in ("write_file", "edit_file"):
+                        raw_path = (tool_call.arguments or {}).get("path", "")
+                        if raw_path:
+                            ok = result.startswith("Successfully wrote") if tool_call.name == "write_file" else result.startswith("Successfully edited")
+                            if ok:
+                                try:
+                                    p = Path(raw_path).expanduser()
+                                    if not p.is_absolute():
+                                        p = self.workspace / p
+                                    rel = str(p.resolve().relative_to(self.workspace.resolve()))
+                                    await on_progress(rel, file_hint=True)
+                                except Exception:
+                                    pass
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -473,11 +487,12 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
         )
 
-        async def _bus_progress(content: str, *, tool_hint: bool = False, skill_hint: bool = False) -> None:
+        async def _bus_progress(content: str, *, tool_hint: bool = False, skill_hint: bool = False, file_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
             meta["_skill_hint"] = skill_hint
+            meta["_file_hint"] = file_hint
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))

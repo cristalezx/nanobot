@@ -720,8 +720,15 @@ def create_app(
         # sends back an {type: approval_response, id, approved} message.
         pending_approvals: dict[str, asyncio.Future] = {}
 
-        async def on_progress(text: str, *, tool_hint: bool = False, skill_hint: bool = False) -> None:
-            msg_type = "skill" if skill_hint else ("tool" if tool_hint else "progress")
+        async def on_progress(text: str, *, tool_hint: bool = False, skill_hint: bool = False, file_hint: bool = False) -> None:
+            if file_hint:
+                msg_type = "file_written"
+            elif skill_hint:
+                msg_type = "skill"
+            elif tool_hint:
+                msg_type = "tool"
+            else:
+                msg_type = "progress"
             try:
                 await ws.send_json({"type": msg_type, "content": text})
             except Exception:
