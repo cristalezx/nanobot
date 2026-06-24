@@ -409,10 +409,10 @@ body.resizing iframe { pointer-events: none; }
 }
 @keyframes caret-blink { to { visibility: hidden; } }
 .stream-rate {
-  position: absolute; top: -18px; right: 0;
+  display: block;
   font-size: 0.7rem; color: var(--text-faint);
-  background: var(--surface); padding: 1px 5px; border-radius: 4px;
-  pointer-events: none; white-space: nowrap;
+  text-align: right; margin-top: 3px;
+  pointer-events: none;
 }
 /* Tables rendered from markdown (GFM) */
 .bubble table { border-collapse: collapse; margin: 8px 0; font-size: 0.85em;
@@ -871,7 +871,7 @@ function getSes(sid) {
     sesStore.set(sid, {
       ws: null, busy: false, unread: false, chatEl: el,
       typingEl: null, streamBubbleEl: null, streamBuffer: '',
-      streamRateEl: null, streamTokenCount: 0, streamStartTime: 0,
+      streamRateEl: null, _streamTextNode: null, streamTokenCount: 0, streamStartTime: 0,
       currentStepsGroup: null, stepsCounter: 0,
       toolsUsed: [], skillsUsed: [], filesWrittenThisTurn: []
     });
@@ -2169,7 +2169,7 @@ function connectSession(sid) {
       s.streamBubbleEl.classList.remove('streaming');
       s.streamBubbleEl.innerHTML = renderMarkdown(s.streamBuffer);
       enhanceBubble(s.streamBubbleEl);
-      s.streamBubbleEl = null; s.streamBuffer = '';
+      s.streamBubbleEl = null; s._streamTextNode = null; s.streamBuffer = '';
       s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
     }
     s.busy = false;
@@ -2264,8 +2264,8 @@ async function clearSession() {
   s.chatEl.innerHTML = '';
   s.currentStepsGroup = null; s.stepsCounter = 0;
   s.toolsUsed = []; s.skillsUsed = [];
-  s.filesWrittenThisTurn = []; s.streamBubbleEl = null; s.streamBuffer = '';
-  s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
+  s.filesWrittenThisTurn = []; s.streamBubbleEl = null; s._streamTextNode = null;
+  s.streamBuffer = ''; s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
   appendSystem('会话「' + sid + '」已清除');
   loadSessionList();
 }
@@ -2372,34 +2372,38 @@ function appendPush(text) {
 function streamToken(delta) {
   var s = getSes(currentSessionId);
   if (!s.streamBubbleEl) {
-    var el = document.createElement('div');
-    el.className = 'msg bot';
-    el.innerHTML = '<div class="avatar">🐕</div><div class="bubble streaming"></div>';
-    chatAppend(el);
-    s.streamBubbleEl = el.querySelector('.bubble');
+    var wrapper = document.createElement('div');
+    wrapper.className = 'msg bot';
+    var avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = '🐕';
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble streaming';
+    // Dedicated text node keeps text separate from the rate div
+    var textNode = document.createTextNode('');
+    var rateEl = document.createElement('div');
+    rateEl.className = 'stream-rate';
+    bubble.appendChild(textNode);
+    bubble.appendChild(rateEl);
+    wrapper.appendChild(avatar);
+    wrapper.appendChild(bubble);
+    chatAppend(wrapper);
+    s.streamBubbleEl = bubble;
+    s._streamTextNode = textNode;
+    s.streamRateEl = rateEl;
     s.streamBuffer = '';
     s.streamTokenCount = 0;
     s.streamStartTime = Date.now();
-    // Rate overlay — floats above the caret
-    var rateEl = document.createElement('span');
-    rateEl.className = 'stream-rate';
-    s.streamBubbleEl.appendChild(rateEl);
-    s.streamRateEl = rateEl;
   }
   s.streamBuffer += delta;
   s.streamTokenCount++;
-  // Update rate every 8 tokens to avoid excessive DOM writes
-  if (s.streamRateEl && s.streamTokenCount % 8 === 0) {
+  s._streamTextNode.textContent = s.streamBuffer;
+  // Refresh rate every 5 tokens
+  if (s.streamTokenCount % 5 === 0) {
     var elapsed = (Date.now() - s.streamStartTime) / 1000;
-    if (elapsed > 0.5) {
+    if (elapsed > 0.2) {
       s.streamRateEl.textContent = Math.round(s.streamTokenCount / elapsed) + ' tok/s';
     }
-  }
-  // Use textContent on a text node so the rate overlay (child element) is preserved
-  if (s.streamBubbleEl.firstChild && s.streamBubbleEl.firstChild.nodeType === Node.TEXT_NODE) {
-    s.streamBubbleEl.firstChild.textContent = s.streamBuffer;
-  } else {
-    s.streamBubbleEl.insertBefore(document.createTextNode(s.streamBuffer), s.streamBubbleEl.firstChild);
   }
   scrollBottom();
 }
@@ -2410,11 +2414,10 @@ function streamCancel() {
     var msgEl = s.streamBubbleEl.closest('.msg');
     if (msgEl) msgEl.remove();
   }
-  s.streamBubbleEl = null;
+  s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = '';
   s.streamRateEl = null;
-  s.streamTokenCount = 0;
-  s.streamStartTime = 0;
+  s.streamTokenCount = 0; s.streamStartTime = 0;
 }
 
 function streamFinalize(finalText) {
@@ -2423,11 +2426,10 @@ function streamFinalize(finalText) {
   s.streamBubbleEl.classList.remove('streaming');
   s.streamBubbleEl.innerHTML = renderMarkdown(finalText != null ? finalText : s.streamBuffer);
   enhanceBubble(s.streamBubbleEl);
-  s.streamBubbleEl = null;
+  s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = '';
   s.streamRateEl = null;
-  s.streamTokenCount = 0;
-  s.streamStartTime = 0;
+  s.streamTokenCount = 0; s.streamStartTime = 0;
   scrollBottom();
   return true;
 }
