@@ -87,6 +87,10 @@ class SkillFileSaveRequest(BaseModel):
     content: str
 
 
+class ReportPublishRequest(BaseModel):
+    path: str
+
+
 # Skill names map to directory names — restrict to a safe character set.
 _SKILL_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -754,6 +758,112 @@ def create_app(
             filename=target.name,
             headers={"Content-Disposition": f'attachment; filename="{target.name}"'},
         )
+
+    # ------------------------------------------------------------------ Reports
+    # Reports are just markdown files under the workspace:
+    #   reports/    → personal drafts
+    #   published/  → published to the team board
+    # An optional sibling data file (<stem>.data.* / <stem>.snapshot.*) is the
+    # snapshot that powers cheap follow-up questions without re-querying.
+    _REPORT_EXTS = (".md", ".markdown")
+
+    def _is_snapshot_sibling(name: str) -> bool:
+        n = name.lower()
+        return ".data." in n or ".snapshot." in n
+
+    def _parse_report_meta(path: Path) -> dict:
+        """Best-effort read of a report's frontmatter + snapshot sibling."""
+        title = path.stem
+        author = ""
+        series = ""
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        if text.startswith("---"):
+            end = text.find("\n---", 3)
+            if end != -1:
+                for line in text[3:end].splitlines():
+                    if ":" in line:
+                        k, _, v = line.partition(":")
+                        k = k.strip().lower()
+                        v = v.strip().strip('"').strip("'")
+                        if k == "title" and v:
+                            title = v
+                        elif k == "author":
+                            author = v
+                        elif k == "series":
+                            series = v
+        if title == path.stem:
+            for line in text.splitlines():
+                if line.startswith("# "):
+                    title = line[2:].strip()
+                    break
+        snapshot = None
+        try:
+            for sib in path.parent.glob(path.stem + ".*"):
+                if sib != path and _is_snapshot_sibling(sib.name):
+                    snapshot = sib.name
+                    break
+        except OSError:
+            pass
+        return {"title": title, "author": author, "series": series, "snapshot": snapshot}
+
+    @app.get("/v1/reports")
+    async def list_reports(request: Request):
+        """List reports from reports/ (drafts) and published/ (team board)."""
+        ag = _get_agent(request)
+        ws = ag.context.workspace.resolve()
+        out = []
+        for status, sub in (("published", "published"), ("draft", "reports")):
+            d = ws / sub
+            if not d.is_dir():
+                continue
+            for p in sorted(d.rglob("*")):
+                if not (p.is_file() and p.suffix.lower() in _REPORT_EXTS):
+                    continue
+                meta = _parse_report_meta(p)
+                try:
+                    rel = str(p.relative_to(ws))
+                except ValueError:
+                    rel = str(p)
+                try:
+                    mtime = p.stat().st_mtime
+                except OSError:
+                    mtime = 0
+                out.append({
+                    "path": rel, "name": p.name, "status": status,
+                    "title": meta["title"], "author": meta["author"],
+                    "series": meta["series"], "snapshot": meta["snapshot"],
+                    "updated_at": mtime,
+                })
+        out.sort(key=lambda x: (x["status"] != "draft", -x["updated_at"]))
+        return {"reports": out}
+
+    @app.post("/v1/reports/publish")
+    async def publish_report(request: Request, body: ReportPublishRequest):
+        """Publish a draft report (copy it + its snapshot into published/)."""
+        ag = _get_agent(request)
+        ws = ag.context.workspace.resolve()
+        src = _resolve_path(body.path, ag)
+        if not src.is_file() or src.suffix.lower() not in _REPORT_EXTS:
+            raise HTTPException(status_code=404, detail="Report not found")
+        pub_dir = ws / "published"
+        pub_dir.mkdir(parents=True, exist_ok=True)
+        # Stamp the author into the frontmatter if we know who published.
+        username = _tokens.get(
+            request.headers.get("X-Token") or request.query_params.get("token") or "", ""
+        )
+        shutil.copy2(src, pub_dir / src.name)
+        # Carry the snapshot sibling(s) so published reports stay interrogable.
+        try:
+            for sib in src.parent.glob(src.stem + ".*"):
+                if sib != src and _is_snapshot_sibling(sib.name):
+                    shutil.copy2(sib, pub_dir / sib.name)
+        except OSError:
+            pass
+        rel = str((pub_dir / src.name).relative_to(ws))
+        return {"ok": True, "path": rel, "author": username}
 
     # ---- Diagnostic: push a test message to verify the WS push pipeline ----
     @app.post("/v1/test-push/{session_id}")

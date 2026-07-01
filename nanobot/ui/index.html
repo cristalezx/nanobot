@@ -382,6 +382,47 @@ body.resizing iframe { pointer-events: none; }
   flex: 1; overflow-y: auto;
 }
 
+/* ── Reports panel ── */
+#reports-header {
+  padding: 8px 12px; display: flex; gap: 6px; align-items: center;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#reports-header input {
+  flex: 1; background: #fff; border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 9px; font-size: 0.78rem; outline: none;
+}
+#reports-header input:focus { border-color: var(--accent); }
+#reports-header button {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 1rem; padding: 2px 6px; border-radius: 4px;
+}
+#reports-header button:hover { background: var(--hover); color: var(--text); }
+#reports-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.report-grp { padding: 8px 13px 3px; font-size: 0.63rem; color: var(--text-faint); text-transform: uppercase; font-weight: 600; }
+.report-item { margin: 2px 7px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.report-item:hover { background: var(--hover); }
+.report-item.active { background: var(--active); }
+.report-title { font-size: 0.83rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.report-meta { font-size: 0.69rem; color: var(--text-faint); margin-top: 3px; display: flex; gap: 6px; align-items: center; }
+.report-badge { font-size: 0.6rem; padding: 1px 6px; border-radius: 20px; font-weight: 600; }
+.report-badge.pub { background: #e7f6ed; color: var(--success); }
+.report-badge.draft { background: #fdf0dd; color: var(--warn); }
+.report-snap { font-size: 0.62rem; color: var(--accent); background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+.report-actions { display: flex; gap: 6px; margin-top: 7px; }
+.report-actions button { font-size: 0.68rem; padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; }
+.report-actions button.ref { color: var(--accent); border-color: #d5d5ff; }
+.report-actions button:hover { background: var(--hover); }
+
+/* ── Referenced-report chip (above input) ── */
+#ref-bar { flex-shrink: 0; padding: 8px max(16px, calc((100% - 820px) / 2)) 0; }
+#ref-bar .picked {
+  display: inline-flex; align-items: center; gap: 7px; background: var(--accent-soft);
+  border: 1px solid #e0e0ff; color: var(--accent); border-radius: 8px;
+  padding: 5px 10px; font-size: 0.74rem;
+}
+#ref-bar .picked .rx { cursor: pointer; font-weight: 700; padding: 0 2px; }
+#ref-bar .picked .rx:hover { color: var(--accent-hover); }
+
 /* ── Session artifacts bar ── */
 #chat-artifacts-bar {
   flex-shrink: 0; display: none; align-items: center; justify-content: flex-end;
@@ -861,9 +902,15 @@ body.resizing iframe { pointer-events: none; }
       <div id="skills-list"></div>
     </div>
 
-    <!-- Reports Panel (built in a later batch) -->
+    <!-- Reports Panel -->
     <div id="panel-reports" class="sidebar-panel">
-      <div class="panel-placeholder">📊 报告管理<br>即将上线</div>
+      <div id="reports-header">
+        <input id="reports-search" type="text" placeholder="搜索报告…" oninput="renderReports()" autocomplete="off">
+        <input id="reports-upload-input" type="file" multiple style="display:none" onchange="uploadReports(this.files)">
+        <button onclick="document.getElementById('reports-upload-input').click()" title="上传线下报告">↥</button>
+        <button onclick="loadReports()" title="刷新">↻</button>
+      </div>
+      <div id="reports-list"></div>
     </div>
 
     <!-- Cron Panel (built in a later batch) -->
@@ -885,6 +932,7 @@ body.resizing iframe { pointer-events: none; }
       <div class="art-pop" id="art-pop"></div>
     </div>
     <div id="chat"></div>
+    <div id="ref-bar" style="display:none;"></div>
     <div id="input-bar">
       <button id="attach-btn" onclick="document.getElementById('chat-upload-input').click()" title="上传附件">📎</button>
       <input id="chat-upload-input" type="file" multiple style="display:none" onchange="uploadChatAttachments(this.files)">
@@ -960,7 +1008,8 @@ function getSes(sid) {
       streamRateEl: null, _streamTextNode: null, streamTokenCount: 0, streamStartTime: 0,
       currentStepsGroup: null, stepsCounter: 0,
       toolsUsed: [], skillsUsed: [], filesWrittenThisTurn: [],
-      sessionArtifacts: []  // {path, name} accumulated across the whole session
+      sessionArtifacts: [],  // {path, name} accumulated across the whole session
+      referencedReport: null  // {path, name, snapshot} — report referenced for follow-up
     });
   }
   return sesStore.get(sid);
@@ -1241,6 +1290,8 @@ function switchSidebarTab(tab) {
     loadFiles(currentFilePath || '');
   } else if (tab === 'skills') {
     loadSkills();
+  } else if (tab === 'reports') {
+    loadReports();
   }
 }
 
@@ -1333,6 +1384,7 @@ function switchSession(sid) {
   dot.className = (s.ws && s.ws.readyState === WebSocket.OPEN) ? 'connected' : '';
   sendBtn.disabled = s.busy;
   renderArtifactsBar();
+  renderRefChip();
 
   // Scroll to bottom of newly visible session
   chat.scrollTop = chat.scrollHeight;
@@ -2330,7 +2382,17 @@ function sendMessage() {
   var s = getSes(activeSessionId);
   if (!text || s.busy || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
   appendUser(text);
-  s.ws.send(JSON.stringify({ content: text }));
+  var payload = text;
+  if (s.referencedReport) {
+    var r = s.referencedReport;
+    var hint = '[引用报告文件：' + r.path;
+    if (r.snapshot) {
+      hint += '（同目录快照文件 ' + r.snapshot + ' 含底层数据，优先读取快照复用，避免重新查询日志库）';
+    }
+    hint += '。请先阅读该报告' + (r.snapshot ? '及其快照' : '') + '，再据此回答以下问题。]\n\n';
+    payload = hint + text;
+  }
+  s.ws.send(JSON.stringify({ content: payload }));
   input.value = '';
   input.style.height = '';
   s.currentStepsGroup = null;
@@ -2363,6 +2425,7 @@ async function clearSession() {
   s.filesWrittenThisTurn = []; s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = ''; s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
   s.sessionArtifacts = []; renderArtifactsBar();
+  s.referencedReport = null; renderRefChip();
   appendSystem('会话「' + sid + '」已清除');
   loadSessionList();
 }
@@ -2823,6 +2886,111 @@ document.addEventListener('click', function(e) {
     if (pop) pop.classList.remove('show');
   }
 });
+
+// ── Reports ──────────────────────────────────────────────────────────────────
+var _allReports = [], _shownReports = [];
+async function loadReports() {
+  try {
+    var res = await apiFetch('/v1/reports');
+    if (!res.ok) return;
+    var data = await res.json();
+    _allReports = data.reports || [];
+    renderReports();
+  } catch (e) { console.error('loadReports', e); }
+}
+function renderReports() {
+  var list = document.getElementById('reports-list');
+  if (!list) return;
+  var q = (document.getElementById('reports-search').value || '').toLowerCase();
+  var items = _allReports.filter(function(r) {
+    return !q || (r.title + ' ' + r.name + ' ' + r.path).toLowerCase().indexOf(q) >= 0;
+  });
+  _shownReports = [];
+  if (!items.length) {
+    list.innerHTML = '<div style="padding:14px;color:var(--text-faint);font-size:0.8rem;line-height:1.6;">' +
+      (q ? '无匹配报告' : '暂无报告<br>可在对话中生成，或点 ↥ 上传线下报告') + '</div>';
+    return;
+  }
+  function grp(title, arr) {
+    if (!arr.length) return '';
+    var h = '<div class="report-grp">' + title + ' · ' + arr.length + '</div>';
+    arr.forEach(function(r) {
+      var i = _shownReports.length; _shownReports.push(r);
+      var badge = r.status === 'published'
+        ? '<span class="report-badge pub">已发布</span>'
+        : '<span class="report-badge draft">草稿</span>';
+      var author = r.author ? escapeHtml(r.author) : (r.status === 'published' ? '团队' : '我');
+      var snap = r.snapshot ? '<span class="report-snap">📎快照</span>' : '';
+      var acts = '<div class="report-actions">' +
+        '<button class="ref" onclick="referenceReportIdx(' + i + ',event)">📎 引用追问</button>' +
+        (r.status === 'draft' ? '<button onclick="publishReportIdx(' + i + ',event)">发布</button>' : '') +
+        '</div>';
+      h += '<div class="report-item" onclick="openReportIdx(' + i + ')">' +
+        '<div class="report-title" title="' + escapeAttr(r.title) + '">' + escapeHtml(r.title) + '</div>' +
+        '<div class="report-meta">' + badge + author + snap + '</div>' + acts + '</div>';
+    });
+    return h;
+  }
+  list.innerHTML =
+    grp('团队看板 · 已发布', items.filter(function(r) { return r.status === 'published'; })) +
+    grp('我的草稿', items.filter(function(r) { return r.status === 'draft'; }));
+}
+function openReportIdx(i) { var r = _shownReports[i]; if (r) openFile(r.path, r.name); }
+function referenceReportIdx(i, e) {
+  if (e) e.stopPropagation();
+  var r = _shownReports[i]; if (!r) return;
+  referenceReport(r.path, r.title, r.snapshot);
+}
+function publishReportIdx(i, e) {
+  if (e) e.stopPropagation();
+  var r = _shownReports[i]; if (r) publishReport(r.path, r.title);
+}
+function referenceReport(path, name, snapshot) {
+  var s = getSes(activeSessionId);
+  s.referencedReport = { path: path, name: name, snapshot: snapshot || null };
+  renderRefChip();
+  appendSystem('已引用报告「' + name + '」' + (snapshot ? '（含数据快照）' : '') + '，可在下方直接追问');
+  input.focus();
+}
+function clearRef() {
+  getSes(activeSessionId).referencedReport = null;
+  renderRefChip();
+}
+function renderRefChip() {
+  var bar = document.getElementById('ref-bar');
+  var r = getSes(activeSessionId).referencedReport;
+  if (r) {
+    bar.style.display = '';
+    bar.innerHTML = '<span class="picked">📎 已引用报告：<b>' + escapeHtml(r.name) + '</b>' +
+      (r.snapshot ? ' · 复用快照' : '') + '<span class="rx" onclick="clearRef()">✕</span></span>';
+  } else {
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+  }
+}
+async function publishReport(path, title) {
+  if (!confirm('发布「' + title + '」到团队看板？\n\n发布后全员可见，请确认不含敏感原文（用户隐私、密钥等）。')) return;
+  try {
+    var res = await apiFetch('/v1/reports/publish', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path }),
+    });
+    if (res.ok) { appendSystem('报告「' + title + '」已发布到团队看板'); loadReports(); }
+    else appendSystem('发布失败');
+  } catch (e) { appendSystem('发布失败：' + (e && e.message ? e.message : e)); }
+}
+async function uploadReports(fileList) {
+  var files = Array.from(fileList || []);
+  if (!files.length) return;
+  appendSystem('上传报告中… (' + files.length + ' 个文件)');
+  var ok = 0;
+  for (var i = 0; i < files.length; i++) {
+    try { if (await uploadOneFile(files[i], 'reports')) ok++; } catch (_) {}
+  }
+  document.getElementById('reports-upload-input').value = '';
+  appendSystem('已上传 ' + ok + ' 个文件到 reports/（草稿）');
+  loadReports();
+}
 
 function showTyping() {
   var s = getSes(currentSessionId);
