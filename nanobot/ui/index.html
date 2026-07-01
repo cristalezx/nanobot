@@ -427,6 +427,18 @@ body.resizing iframe { pointer-events: none; }
 .cron-st { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .cron-st.ok { background: var(--success); } .cron-st.fail { background: var(--danger); } .cron-st.off { background: var(--text-faint); }
 
+/* ── Settings / user management ── */
+#users-header { padding: 9px 12px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#users-header .ttl { flex: 1; font-weight: 600; font-size: 0.83rem; }
+#users-header button.g { border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 0.95rem; padding: 2px 6px; border-radius: 4px; }
+#users-header button.g:hover { background: var(--hover); }
+#users-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.user-item { margin: 3px 8px; padding: 9px 11px; border-radius: 9px; display: flex; align-items: center; gap: 8px; }
+.user-item:hover { background: var(--hover); }
+.user-item .un { flex: 1; font-size: 0.84rem; min-width: 0; }
+.user-item .un .adm { font-size: 0.6rem; background: var(--accent-soft); color: var(--accent); padding: 1px 5px; border-radius: 5px; margin-left: 5px; }
+.user-item .pub-lbl { font-size: 0.68rem; color: var(--text-faint); margin-top: 2px; }
+
 /* ── Generic modal ── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 1000; }
 .modal-overlay.show { display: flex; }
@@ -887,6 +899,8 @@ body.resizing iframe { pointer-events: none; }
     <button class="rail-item" data-tab="skills" onclick="switchSidebarTab('skills')" title="技能"><span class="rail-ic"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6 7 18.2l1.9-5.8L4 8.8h6.1z"/></svg></span><span class="rail-lb">技能</span></button>
     <button class="rail-item" data-tab="reports" onclick="switchSidebarTab('reports')" title="报告"><span class="rail-ic"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span class="rail-lb">报告</span></button>
     <button class="rail-item" data-tab="cron" onclick="switchSidebarTab('cron')" title="定时任务"><span class="rail-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="rail-lb">定时</span></button>
+    <div class="rail-sp"></div>
+    <button class="rail-item" data-tab="settings" id="rail-settings" onclick="switchSidebarTab('settings')" title="设置" style="display:none"><span class="rail-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="rail-lb">设置</span></button>
   </div>
 
   <!-- Sidebar -->
@@ -956,6 +970,15 @@ body.resizing iframe { pointer-events: none; }
         <button class="g" onclick="loadCron()" title="刷新">↻</button>
       </div>
       <div id="cron-list"></div>
+    </div>
+
+    <!-- Settings / Admin (user management) -->
+    <div id="panel-settings" class="sidebar-panel">
+      <div id="users-header">
+        <span class="ttl">用户管理</span>
+        <button class="g" onclick="loadUsers()" title="刷新">↻</button>
+      </div>
+      <div id="users-list"></div>
     </div>
   </div>
 
@@ -1362,7 +1385,7 @@ async function switchModel() {
 
 // ── Sidebar tabs ───────────────────────────────────────────────────────────
 function switchSidebarTab(tab) {
-  var tabs = ['sessions', 'files', 'skills', 'reports', 'cron'];
+  var tabs = ['sessions', 'files', 'skills', 'reports', 'cron', 'settings'];
   tabs.forEach(function(t) {
     var panel = document.getElementById('panel-' + t);
     if (panel) panel.classList.toggle('active', t === tab);
@@ -1378,6 +1401,8 @@ function switchSidebarTab(tab) {
     loadReports();
   } else if (tab === 'cron') {
     loadCron();
+  } else if (tab === 'settings') {
+    loadUsers();
   }
 }
 
@@ -2974,12 +2999,52 @@ document.addEventListener('click', function(e) {
 });
 
 // ── Reports ──────────────────────────────────────────────────────────────────
-var _allReports = [], _shownReports = [], _canPublish = true;
+var _allReports = [], _shownReports = [], _canPublish = true, _isAdmin = false;
 async function loadMe() {
   try {
     var res = await apiFetch('/v1/me');
-    if (res.ok) { var d = await res.json(); _canPublish = !!d.can_publish; }
+    if (res.ok) {
+      var d = await res.json();
+      _canPublish = !!d.can_publish;
+      _isAdmin = !!d.admin;
+      var rs = document.getElementById('rail-settings');
+      if (rs) rs.style.display = _isAdmin ? '' : 'none';
+    }
   } catch (e) {}
+}
+
+// ── Settings: user management (admin only) ───────────────────────────────────
+var _users = [];
+async function loadUsers() {
+  try {
+    var res = await apiFetch('/v1/admin/users');
+    var list = document.getElementById('users-list');
+    if (!res.ok) { list.innerHTML = '<div style="padding:14px;color:var(--text-faint);font-size:0.8rem;">无权限，或未启用多用户模式</div>'; return; }
+    var d = await res.json(); _users = d.users || []; renderUsers();
+  } catch (e) {}
+}
+function renderUsers() {
+  var list = document.getElementById('users-list'); if (!list) return;
+  if (!_users.length) { list.innerHTML = '<div style="padding:14px;color:var(--text-faint);font-size:0.8rem;">暂无用户</div>'; return; }
+  list.innerHTML = _users.map(function(u) {
+    var adm = u.admin ? '<span class="adm">管理员</span>' : '';
+    return '<div class="user-item"><div class="un">' + escapeHtml(u.username) + adm +
+      '<div class="pub-lbl">可发布到看板</div></div>' +
+      '<div class="mb-sw' + (u.can_publish ? ' on' : '') + '" onclick="toggleUserPublish(\'' + escapeAttr(u.username) + '\',this)"></div></div>';
+  }).join('');
+}
+async function toggleUserPublish(username, el) {
+  var newVal = !el.classList.contains('on');
+  try {
+    var res = await apiFetch('/v1/admin/users/' + encodeURIComponent(username), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ can_publish: newVal }),
+    });
+    if (res.ok) {
+      el.classList.toggle('on', newVal);
+      for (var i = 0; i < _users.length; i++) if (_users[i].username === username) _users[i].can_publish = newVal;
+    } else appendSystem('修改失败');
+  } catch (e) { appendSystem('修改失败：' + e); }
 }
 async function loadReports() {
   try {

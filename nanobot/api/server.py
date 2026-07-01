@@ -106,6 +106,10 @@ class CronEnableRequest(BaseModel):
     enabled: bool
 
 
+class AdminUserUpdate(BaseModel):
+    can_publish: bool | None = None
+
+
 # Skill names map to directory names — restrict to a safe character set.
 _SKILL_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -119,6 +123,7 @@ def create_app(
     allow_host_paths: bool = False,
     user_agents: dict[str, dict] | None = None,
     board_dir: Path | None = None,
+    users_config_path: Path | None = None,
 ) -> FastAPI:
     """Build and return the FastAPI application.
 
@@ -199,6 +204,30 @@ def create_app(
         if not _is_multi_user:
             return True
         return bool(user_agents.get(_username_of(request), {}).get("can_publish", False))
+
+    def _is_admin(request: Request) -> bool:
+        """Admin is a multi-user concept: the config's admin flag."""
+        if not _is_multi_user:
+            return False
+        return bool(user_agents.get(_username_of(request), {}).get("admin", False))
+
+    def _persist_user_field(username: str, field: str, value) -> bool:
+        """Write a single user field back to the users config file (best-effort)."""
+        if not users_config_path:
+            return False
+        try:
+            import yaml  # type: ignore[import]
+            data = yaml.safe_load(users_config_path.read_text(encoding="utf-8")) or {}
+            if username in data and isinstance(data[username], dict):
+                data[username][field] = value
+                users_config_path.write_text(
+                    yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8",
+                )
+                return True
+        except Exception as e:
+            logger.warning("Failed to persist user field {}={}: {}", field, value, e)
+        return False
 
     def _resolve_path(path: str, ag: AgentLoop | None = None) -> Path:
         """Resolve a path according to allow_host_paths setting.
@@ -343,7 +372,44 @@ def create_app(
             "username": _username_of(request),
             "can_publish": _can_publish(request),
             "multi_user": _is_multi_user,
+            "admin": _is_admin(request),
         }
+
+    # ------------------------------------------------------------------ Admin
+    @app.get("/v1/admin/users")
+    async def admin_list_users(request: Request):
+        """List users and their permissions (admin only, no secrets)."""
+        _get_agent(request)  # verify auth
+        if not _is_admin(request):
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        users = []
+        for uname, ua in (user_agents or {}).items():
+            try:
+                ws = str(ua["agent"].context.workspace)
+            except Exception:
+                ws = ""
+            users.append({
+                "username": uname,
+                "can_publish": bool(ua.get("can_publish")),
+                "admin": bool(ua.get("admin")),
+                "workspace": ws,
+            })
+        users.sort(key=lambda x: x["username"])
+        return {"users": users}
+
+    @app.put("/v1/admin/users/{username}")
+    async def admin_update_user(username: str, request: Request, body: AdminUserUpdate):
+        """Update a user's permissions (admin only). Persists to the users file."""
+        _get_agent(request)
+        if not _is_admin(request):
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        if not user_agents or username not in user_agents:
+            raise HTTPException(status_code=404, detail="User not found")
+        if body.can_publish is not None:
+            user_agents[username]["can_publish"] = bool(body.can_publish)
+            _persist_user_field(username, "can_publish", bool(body.can_publish))
+        return {"ok": True, "username": username,
+                "can_publish": bool(user_agents[username].get("can_publish"))}
 
     # ------------------------------------------------------------------ REST
     @app.get("/v1/health")

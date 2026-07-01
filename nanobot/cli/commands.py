@@ -615,6 +615,7 @@ def serve(
             user_agents_map[uname] = {
                 "password": ucfg.get("password", ""),
                 "can_publish": bool(ucfg.get("can_publish", False)),
+                "admin": bool(ucfg.get("admin", False)),
                 "agent": u_agent,
                 "bus": u_bus,
             }
@@ -630,6 +631,7 @@ def serve(
         user_agents=user_agents_map,
         # Shared team board lives in the root workspace so all users see it.
         board_dir=cfg.workspace_path / "published",
+        users_config_path=Path(users_file) if users_file else None,
     )
 
     async def run():
