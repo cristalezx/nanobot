@@ -990,6 +990,52 @@ def create_app(
         return {"path": path, "name": target.name, "content": content,
                 "editable": not path.startswith("published/")}
 
+    async def _write_upload(dst: Path, up: UploadFile) -> int:
+        size = 0
+        with dst.open("wb") as out:
+            while True:
+                chunk = await up.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                size += len(chunk)
+        await up.close()
+        return size
+
+    @app.post("/v1/reports/upload")
+    async def upload_report(
+        request: Request,
+        report: UploadFile = File(...),
+        snapshot: UploadFile | None = File(None),
+    ):
+        """Upload an offline report (+ optional snapshot) into reports/ as a draft.
+
+        The snapshot is saved as ``<report-stem>.data.<ext>`` so it's detected as
+        the report's sibling and can power reference-and-ask follow-ups.
+        """
+        ag = _get_agent(request)
+        rdir = ag.context.workspace.resolve() / "reports"
+        rdir.mkdir(parents=True, exist_ok=True)
+
+        rname = Path(report.filename or "report.md").name or "report.md"
+        rtarget = (rdir / rname)
+        if rtarget.exists():
+            i = 1
+            while (rdir / f"{rtarget.stem}-{i}{rtarget.suffix}").exists():
+                i += 1
+            rtarget = rdir / f"{rtarget.stem}-{i}{rtarget.suffix}"
+        await _write_upload(rtarget, report)
+
+        snap_name = None
+        if snapshot is not None and snapshot.filename:
+            sext = Path(snapshot.filename).suffix or ".json"
+            snap_target = rdir / f"{rtarget.stem}.data{sext}"
+            await _write_upload(snap_target, snapshot)
+            snap_name = snap_target.name
+
+        return {"ok": True, "path": "reports/" + rtarget.name,
+                "name": rtarget.name, "snapshot": snap_name}
+
     @app.post("/v1/reports/publish")
     async def publish_report(request: Request, body: ReportPublishRequest):
         """Publish a draft to the shared team board (requires publish permission)."""

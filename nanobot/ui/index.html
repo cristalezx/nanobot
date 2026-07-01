@@ -955,8 +955,7 @@ body.resizing iframe { pointer-events: none; }
     <div id="panel-reports" class="sidebar-panel">
       <div id="reports-header">
         <input id="reports-search" type="text" placeholder="搜索报告…" oninput="renderReports()" autocomplete="off">
-        <input id="reports-upload-input" type="file" multiple style="display:none" onchange="uploadReports(this.files)">
-        <button onclick="document.getElementById('reports-upload-input').click()" title="上传线下报告">↥</button>
+        <button onclick="openReportUpload()" title="上传线下报告">↥</button>
         <button onclick="loadReports()" title="刷新">↻</button>
       </div>
       <div id="reports-list"></div>
@@ -1061,6 +1060,22 @@ body.resizing iframe { pointer-events: none; }
       <div class="mb-note">生成的报告文件由助手写入 reports/，可在“报告”里发布到看板。</div>
     </div>
     <div class="mb-acts"><div style="flex:1"></div><button class="btn secondary" onclick="closeCronNew()">取消</button><button class="btn" onclick="submitNewCron()">创建</button></div>
+  </div>
+</div>
+
+<!-- Upload offline report modal -->
+<div class="modal-overlay" id="report-upload-overlay">
+  <div class="modal-box">
+    <h3>上传线下报告</h3>
+    <p style="font-size:.83rem;color:var(--text-dim);margin-bottom:14px;">把线下产出的报告搬进来，之后可引用追问、发布到看板。</p>
+    <div class="mb-row"><label>报告文件（md 最佳；docx/pdf 可查看）</label>
+      <input type="file" id="ru-report" class="mb-inp" accept=".md,.markdown,.docx,.pdf,.csv,.txt">
+    </div>
+    <div class="mb-row"><label>数据快照（可选，供引用追问复用真实数据）</label>
+      <input type="file" id="ru-snapshot" class="mb-inp">
+      <div class="mb-note">如打标数据 jsonl/csv。上传后会自动与报告配对；不传也能上传，但追问只能基于报告正文。</div>
+    </div>
+    <div class="mb-acts"><div style="flex:1"></div><button class="btn secondary" onclick="closeReportUpload()">取消</button><button class="btn" onclick="submitReportUpload()">上传为草稿</button></div>
   </div>
 </div>
 
@@ -3146,17 +3161,29 @@ async function publishReport(path, title) {
     else appendSystem('发布失败');
   } catch (e) { appendSystem('发布失败：' + (e && e.message ? e.message : e)); }
 }
-async function uploadReports(fileList) {
-  var files = Array.from(fileList || []);
-  if (!files.length) return;
-  appendSystem('上传报告中… (' + files.length + ' 个文件)');
-  var ok = 0;
-  for (var i = 0; i < files.length; i++) {
-    try { if (await uploadOneFile(files[i], 'reports')) ok++; } catch (_) {}
-  }
-  document.getElementById('reports-upload-input').value = '';
-  appendSystem('已上传 ' + ok + ' 个文件到 reports/（草稿）');
-  loadReports();
+function openReportUpload() {
+  document.getElementById('ru-report').value = '';
+  document.getElementById('ru-snapshot').value = '';
+  document.getElementById('report-upload-overlay').classList.add('show');
+}
+function closeReportUpload() {
+  document.getElementById('report-upload-overlay').classList.remove('show');
+}
+async function submitReportUpload() {
+  var rf = document.getElementById('ru-report').files[0];
+  var sf = document.getElementById('ru-snapshot').files[0];
+  if (!rf) { alert('请选择报告文件'); return; }
+  var fd = new FormData();
+  fd.append('report', rf);
+  if (sf) fd.append('snapshot', sf);
+  try {
+    var res = await apiFetch('/v1/reports/upload', { method: 'POST', body: fd });
+    if (res.ok) {
+      closeReportUpload();
+      appendSystem('已上传报告' + (sf ? '（含数据快照）' : '') + '到草稿');
+      loadReports();
+    } else appendSystem('上传失败');
+  } catch (e) { appendSystem('上传失败：' + (e && e.message ? e.message : e)); }
 }
 
 // ── Cron / scheduled tasks ───────────────────────────────────────────────────
