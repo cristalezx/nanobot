@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.cron.types import CronSchedule
 
 
 class ConnectionManager:
@@ -89,6 +90,20 @@ class SkillFileSaveRequest(BaseModel):
 
 class ReportPublishRequest(BaseModel):
     path: str
+
+
+class CronCreateRequest(BaseModel):
+    name: str
+    message: str
+    schedule_kind: str = "cron"   # "cron" | "every"
+    expr: str | None = None       # for kind="cron", e.g. "0 8 * * 1"
+    every_ms: int | None = None   # for kind="every"
+    tz: str | None = None
+    deliver: bool = True
+
+
+class CronEnableRequest(BaseModel):
+    enabled: bool
 
 
 # Skill names map to directory names — restrict to a safe character set.
@@ -864,6 +879,78 @@ def create_app(
             pass
         rel = str((pub_dir / src.name).relative_to(ws))
         return {"ok": True, "path": rel, "author": username}
+
+    # ------------------------------------------------------------------ Cron
+    def _cron_to_dict(j) -> dict:
+        return {
+            "id": j.id, "name": j.name, "enabled": j.enabled,
+            "schedule": {
+                "kind": j.schedule.kind, "expr": j.schedule.expr,
+                "every_ms": j.schedule.every_ms, "at_ms": j.schedule.at_ms,
+                "tz": j.schedule.tz,
+            },
+            "message": j.payload.message, "deliver": j.payload.deliver,
+            "last_status": j.state.last_status, "last_error": j.state.last_error,
+            "last_run_at_ms": j.state.last_run_at_ms,
+            "next_run_at_ms": j.state.next_run_at_ms,
+        }
+
+    @app.get("/v1/cron")
+    async def list_cron(request: Request):
+        ag = _get_agent(request)
+        cron = getattr(ag, "cron_service", None)
+        if not cron:
+            return {"jobs": []}
+        return {"jobs": [_cron_to_dict(j) for j in cron.list_jobs(include_disabled=True)]}
+
+    @app.post("/v1/cron")
+    async def create_cron(request: Request, body: CronCreateRequest):
+        ag = _get_agent(request)
+        cron = getattr(ag, "cron_service", None)
+        if not cron:
+            raise HTTPException(status_code=503, detail="Cron service not available")
+        if body.schedule_kind == "every":
+            sched = CronSchedule(kind="every", every_ms=body.every_ms)
+        else:
+            sched = CronSchedule(kind="cron", expr=body.expr, tz=body.tz)
+        try:
+            job = cron.add_job(
+                name=body.name, schedule=sched, message=body.message,
+                deliver=body.deliver, channel="web", to="default",
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"ok": True, "job": _cron_to_dict(job)}
+
+    @app.delete("/v1/cron/{job_id}")
+    async def delete_cron(job_id: str, request: Request):
+        ag = _get_agent(request)
+        cron = getattr(ag, "cron_service", None)
+        if not cron:
+            raise HTTPException(status_code=503, detail="Cron service not available")
+        return {"ok": cron.remove_job(job_id)}
+
+    @app.post("/v1/cron/{job_id}/enable")
+    async def enable_cron(job_id: str, request: Request, body: CronEnableRequest):
+        ag = _get_agent(request)
+        cron = getattr(ag, "cron_service", None)
+        if not cron:
+            raise HTTPException(status_code=503, detail="Cron service not available")
+        job = cron.enable_job(job_id, body.enabled)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"ok": True, "job": _cron_to_dict(job)}
+
+    @app.post("/v1/cron/{job_id}/run")
+    async def run_cron(job_id: str, request: Request):
+        ag = _get_agent(request)
+        cron = getattr(ag, "cron_service", None)
+        if not cron:
+            raise HTTPException(status_code=503, detail="Cron service not available")
+        ok = await cron.run_job(job_id, force=True)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"ok": True}
 
     # ---- Diagnostic: push a test message to verify the WS push pipeline ----
     @app.post("/v1/test-push/{session_id}")

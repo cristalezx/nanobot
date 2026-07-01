@@ -497,22 +497,43 @@ def serve(
         mcp_servers=cfg.tools.mcp_servers,
     )
 
-    async def on_cron_job(job: CronJob) -> str | None:
-        from nanobot.bus.events import OutboundMessage as OMsg
-        from loguru import logger as _log
+    def make_cron_handler(ag, b):
+        """Build a cron on_job handler bound to a specific agent + bus.
 
-        channel = job.payload.channel or "web"
-        chat_id = job.payload.to or "default"
-        content = job.payload.message
+        For agent_turn payloads the message is run as a real agent turn (so a
+        scheduled task actually generates its report / does its work); for
+        system_event payloads the message is delivered as-is.
+        """
+        async def on_cron_job(job: CronJob) -> str | None:
+            from nanobot.bus.events import OutboundMessage as OMsg
+            from loguru import logger as _log
 
-        _log.info("on_cron_job: '{}' → {}/{}", job.name, channel, chat_id)
+            channel = job.payload.channel or "web"
+            chat_id = job.payload.to or "default"
 
-        if job.payload.deliver and chat_id:
-            await bus.publish_outbound(OMsg(channel=channel, chat_id=chat_id,
-                                           content=content))
-        return content
+            _log.info("on_cron_job: '{}' → {}/{} ({})", job.name, channel, chat_id, job.payload.kind)
 
-    cron.on_job = on_cron_job
+            async def _silent(*_a, **_kw):
+                pass
+
+            if job.payload.kind == "agent_turn" and job.payload.message:
+                result = await ag.process_direct(
+                    job.payload.message,
+                    session_key=f"{channel}:{chat_id}",
+                    channel=channel, chat_id=chat_id,
+                    on_progress=_silent,
+                )
+            else:
+                result = job.payload.message
+
+            if job.payload.deliver and chat_id:
+                await b.publish_outbound(OMsg(channel=channel, chat_id=chat_id,
+                                              content=result or ""))
+            return result
+
+        return on_cron_job
+
+    cron.on_job = make_cron_handler(agent, bus)
 
     def _pick_web_target() -> str:
         """Pick the most recently active web session id."""
@@ -590,6 +611,7 @@ def serve(
                 session_manager=u_sm,
                 mcp_servers=cfg.tools.mcp_servers,
             )
+            u_cron.on_job = make_cron_handler(u_agent, u_bus)
             user_agents_map[uname] = {
                 "password": ucfg.get("password", ""),
                 "agent": u_agent,
