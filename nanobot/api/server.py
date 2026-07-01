@@ -118,17 +118,22 @@ def create_app(
     password: str | None = None,
     allow_host_paths: bool = False,
     user_agents: dict[str, dict] | None = None,
+    board_dir: Path | None = None,
 ) -> FastAPI:
     """Build and return the FastAPI application.
 
     ``user_agents`` enables multi-user mode:
-    ``{username: {"password": str, "agent": AgentLoop, "bus": MessageBus}}``
+    ``{username: {"password": str, "can_publish": bool, "agent": AgentLoop, "bus": MessageBus}}``
+    ``board_dir`` is the shared team board (published/) directory; defaults to
+    the primary agent's workspace/published (single-user).
     """
 
     manager = ConnectionManager()
     _is_multi_user = user_agents is not None
     # token → username; empty string means "single-user / no username"
     _tokens: dict[str, str] = {}
+    # Shared team board (published reports); all users read the same one.
+    _board_dir = (board_dir or (agent.context.workspace / "published")).resolve()
 
     # Read-only share links: share_id → raw value.
     # Single-user: raw = session_id.
@@ -184,6 +189,16 @@ def create_app(
             return user_agents[username]["agent"]
         _check_token(request)
         return agent
+
+    def _username_of(request: Request) -> str:
+        token = request.headers.get("X-Token") or request.query_params.get("token") or ""
+        return _tokens.get(token, "")
+
+    def _can_publish(request: Request) -> bool:
+        """Single-user can always publish; multi-user gates on the config flag."""
+        if not _is_multi_user:
+            return True
+        return bool(user_agents.get(_username_of(request), {}).get("can_publish", False))
 
     def _resolve_path(path: str, ag: AgentLoop | None = None) -> Path:
         """Resolve a path according to allow_host_paths setting.
@@ -319,6 +334,16 @@ def create_app(
     @app.get("/v1/auth/required")
     async def auth_required():
         return {"required": bool(password or _is_multi_user), "multi_user": _is_multi_user}
+
+    @app.get("/v1/me")
+    async def whoami(request: Request):
+        """Return the current user's identity + capabilities (for UI gating)."""
+        _get_agent(request)  # verifies auth
+        return {
+            "username": _username_of(request),
+            "can_publish": _can_publish(request),
+            "multi_user": _is_multi_user,
+        }
 
     # ------------------------------------------------------------------ REST
     @app.get("/v1/health")
@@ -786,6 +811,18 @@ def create_app(
         n = name.lower()
         return ".data." in n or ".snapshot." in n
 
+    def _ensure_author(text: str, username: str) -> str:
+        """Ensure the report frontmatter records who published it."""
+        if not username:
+            return text
+        if text.startswith("---"):
+            end = text.find("\n---", 3)
+            if end != -1:
+                if "author:" not in text[3:end]:
+                    return text[:end] + f"\nauthor: {username}" + text[end:]
+                return text
+        return f"---\nauthor: {username}\n---\n\n{text}"
+
     def _parse_report_meta(path: Path) -> dict:
         """Best-effort read of a report's frontmatter + snapshot sibling."""
         title = path.stem
@@ -824,30 +861,51 @@ def create_app(
             pass
         return {"title": title, "author": author, "series": series, "snapshot": snapshot}
 
+    def _report_target(ag: AgentLoop, logical_path: str) -> tuple[Path, Path]:
+        """Map a logical report path to (target, base).
+
+        'published/<name>' → shared board_dir; anything else → the user's
+        workspace (drafts under reports/).
+        """
+        if logical_path.startswith("published/"):
+            base = _board_dir
+            target = (_board_dir / logical_path[len("published/"):]).resolve()
+        else:
+            base = ag.context.workspace.resolve()
+            target = (base / logical_path).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Path outside allowed area")
+        return target, base
+
     @app.get("/v1/reports")
     async def list_reports(request: Request):
-        """List reports from reports/ (drafts) and published/ (team board)."""
+        """List drafts (user's reports/) and the shared team board (published/)."""
         ag = _get_agent(request)
         ws = ag.context.workspace.resolve()
         out = []
-        for status, sub in (("published", "published"), ("draft", "reports")):
-            d = ws / sub
+        sources = [("draft", ws / "reports", ws), ("published", _board_dir, _board_dir)]
+        for status, d, base in sources:
             if not d.is_dir():
                 continue
             for p in sorted(d.rglob("*")):
                 if not (p.is_file() and p.suffix.lower() in _REPORT_EXTS):
                     continue
                 meta = _parse_report_meta(p)
-                try:
-                    rel = str(p.relative_to(ws))
-                except ValueError:
-                    rel = str(p)
+                if status == "published":
+                    logical = "published/" + p.relative_to(_board_dir).as_posix()
+                else:
+                    try:
+                        logical = str(p.relative_to(ws))
+                    except ValueError:
+                        logical = str(p)
                 try:
                     mtime = p.stat().st_mtime
                 except OSError:
                     mtime = 0
                 out.append({
-                    "path": rel, "name": p.name, "status": status,
+                    "path": logical, "name": p.name, "status": status,
                     "title": meta["title"], "author": meta["author"],
                     "series": meta["series"], "snapshot": meta["snapshot"],
                     "updated_at": mtime,
@@ -855,30 +913,39 @@ def create_app(
         out.sort(key=lambda x: (x["status"] != "draft", -x["updated_at"]))
         return {"reports": out}
 
+    @app.get("/v1/reports/content")
+    async def report_content(request: Request, path: str = Query(...)):
+        """Return a report's markdown by logical path (draft or shared board)."""
+        ag = _get_agent(request)
+        target, _ = _report_target(ag, path)
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="Report not found")
+        content = target.read_text(encoding="utf-8", errors="replace")
+        return {"path": path, "name": target.name, "content": content,
+                "editable": not path.startswith("published/")}
+
     @app.post("/v1/reports/publish")
     async def publish_report(request: Request, body: ReportPublishRequest):
-        """Publish a draft report (copy it + its snapshot into published/)."""
+        """Publish a draft to the shared team board (requires publish permission)."""
         ag = _get_agent(request)
-        ws = ag.context.workspace.resolve()
-        src = _resolve_path(body.path, ag)
+        if not _can_publish(request):
+            raise HTTPException(status_code=403, detail="无发布权限")
+        src, _ = _report_target(ag, body.path)
         if not src.is_file() or src.suffix.lower() not in _REPORT_EXTS:
             raise HTTPException(status_code=404, detail="Report not found")
-        pub_dir = ws / "published"
-        pub_dir.mkdir(parents=True, exist_ok=True)
-        # Stamp the author into the frontmatter if we know who published.
-        username = _tokens.get(
-            request.headers.get("X-Token") or request.query_params.get("token") or "", ""
-        )
-        shutil.copy2(src, pub_dir / src.name)
+        _board_dir.mkdir(parents=True, exist_ok=True)
+        username = _username_of(request)
+        # Stamp the publishing author into the report's frontmatter.
+        text = src.read_text(encoding="utf-8", errors="replace")
+        (_board_dir / src.name).write_text(_ensure_author(text, username), encoding="utf-8")
         # Carry the snapshot sibling(s) so published reports stay interrogable.
         try:
             for sib in src.parent.glob(src.stem + ".*"):
                 if sib != src and _is_snapshot_sibling(sib.name):
-                    shutil.copy2(sib, pub_dir / sib.name)
+                    shutil.copy2(sib, _board_dir / sib.name)
         except OSError:
             pass
-        rel = str((pub_dir / src.name).relative_to(ws))
-        return {"ok": True, "path": rel, "author": username}
+        return {"ok": True, "path": "published/" + src.name, "author": username}
 
     # ------------------------------------------------------------------ Cron
     def _cron_to_dict(j) -> dict:

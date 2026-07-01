@@ -1311,6 +1311,7 @@ function init() {
   _setAuthUser(authUsername);  // show username in header if already stored
   var s = getSes(activeSessionId);
   s.chatEl.style.display = '';   // make the default session visible
+  loadMe();    // learn publish permission for UI gating
   loadSessionList();
   loadModels();
   loadCron();  // populate the ⏰ rail failure badge without opening the tab
@@ -2973,7 +2974,13 @@ document.addEventListener('click', function(e) {
 });
 
 // ── Reports ──────────────────────────────────────────────────────────────────
-var _allReports = [], _shownReports = [];
+var _allReports = [], _shownReports = [], _canPublish = true;
+async function loadMe() {
+  try {
+    var res = await apiFetch('/v1/me');
+    if (res.ok) { var d = await res.json(); _canPublish = !!d.can_publish; }
+  } catch (e) {}
+}
 async function loadReports() {
   try {
     var res = await apiFetch('/v1/reports');
@@ -3008,7 +3015,7 @@ function renderReports() {
       var snap = r.snapshot ? '<span class="report-snap">📎快照</span>' : '';
       var acts = '<div class="report-actions">' +
         '<button class="ref" onclick="referenceReportIdx(' + i + ',event)">📎 引用追问</button>' +
-        (r.status === 'draft' ? '<button onclick="publishReportIdx(' + i + ',event)">发布</button>' : '') +
+        (r.status === 'draft' && _canPublish ? '<button onclick="publishReportIdx(' + i + ',event)">发布</button>' : '') +
         '</div>';
       h += '<div class="report-item" onclick="openReportIdx(' + i + ')">' +
         '<div class="report-title" title="' + escapeAttr(r.title) + '">' + escapeHtml(r.title) + '</div>' +
@@ -3020,7 +3027,16 @@ function renderReports() {
     grp('团队看板 · 已发布', items.filter(function(r) { return r.status === 'published'; })) +
     grp('我的草稿', items.filter(function(r) { return r.status === 'draft'; }));
 }
-function openReportIdx(i) { var r = _shownReports[i]; if (r) openFile(r.path, r.name); }
+function openReportIdx(i) { var r = _shownReports[i]; if (r) openReport(r.path, r.name); }
+async function openReport(path, name) {
+  // Published reports live in the shared board (outside the user workspace),
+  // so read via the reports-content endpoint rather than /v1/files.
+  try {
+    var res = await apiFetch('/v1/reports/content?path=' + encodeURIComponent(path));
+    if (res.ok) { var d = await res.json(); openFileInEditor(path, d.content || '', 'markdown'); return; }
+  } catch (e) {}
+  openFile(path, name);  // fallback
+}
 function referenceReportIdx(i, e) {
   if (e) e.stopPropagation();
   var r = _shownReports[i]; if (!r) return;
@@ -3061,6 +3077,7 @@ async function publishReport(path, title) {
       body: JSON.stringify({ path: path }),
     });
     if (res.ok) { appendSystem('报告「' + title + '」已发布到团队看板'); loadReports(); }
+    else if (res.status === 403) appendSystem('发布失败：你没有发布权限');
     else appendSystem('发布失败');
   } catch (e) { appendSystem('发布失败：' + (e && e.message ? e.message : e)); }
 }

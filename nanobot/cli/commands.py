@@ -614,6 +614,7 @@ def serve(
             u_cron.on_job = make_cron_handler(u_agent, u_bus)
             user_agents_map[uname] = {
                 "password": ucfg.get("password", ""),
+                "can_publish": bool(ucfg.get("can_publish", False)),
                 "agent": u_agent,
                 "bus": u_bus,
             }
@@ -627,6 +628,8 @@ def serve(
         password=password,
         allow_host_paths=allow_host_paths,
         user_agents=user_agents_map,
+        # Shared team board lives in the root workspace so all users see it.
+        board_dir=cfg.workspace_path / "published",
     )
 
     async def run():
