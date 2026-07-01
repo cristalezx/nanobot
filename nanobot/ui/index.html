@@ -146,7 +146,8 @@ body.resizing iframe { pointer-events: none; }
   content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px;
   border-radius: 0 3px 3px 0; background: var(--accent);
 }
-.rail-ic { font-size: 1.12rem; line-height: 1; }
+.rail-ic { display: flex; align-items: center; justify-content: center; height: 21px; }
+.rail-ic svg { width: 21px; height: 21px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .rail-lb { font-size: 0.6rem; }
 .rail-sp { flex: 1; }
 .rail-badge {
@@ -379,6 +380,47 @@ body.resizing iframe { pointer-events: none; }
 }
 #chat {
   flex: 1; overflow-y: auto;
+}
+
+/* ── Session artifacts bar ── */
+#chat-artifacts-bar {
+  flex-shrink: 0; display: none; align-items: center; justify-content: flex-end;
+  gap: 8px; padding: 6px max(16px, calc((100% - 820px) / 2));
+  border-bottom: 1px solid var(--border); position: relative;
+}
+#chat-artifacts-bar.show { display: flex; }
+.art-chip {
+  display: inline-flex; align-items: center; gap: 6px; background: var(--accent-soft);
+  border: 1px solid #e0e0ff; color: var(--accent); border-radius: 8px;
+  padding: 4px 10px; font-size: 0.75rem; cursor: pointer; font-weight: 500;
+}
+.art-chip:hover { background: #e4e4ff; }
+.art-chip svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.art-chip .b { background: var(--accent); color: #fff; border-radius: 20px; padding: 0 6px; font-size: 0.65rem; font-weight: 700; }
+.art-pop {
+  position: absolute; top: 38px; right: max(16px, calc((100% - 820px) / 2));
+  width: 340px; max-height: 62vh; overflow-y: auto; background: #fff;
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.16); z-index: 40; display: none;
+}
+.art-pop.show { display: block; }
+.ap-head { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 0.8rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+.ap-head .all { font-size: 0.71rem; color: var(--accent); cursor: pointer; font-weight: 500; }
+.ap-grp { padding: 8px 14px 3px; font-size: 0.64rem; color: var(--text-faint); text-transform: uppercase; font-weight: 600; }
+.ap-item { padding: 7px 14px; display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.ap-item:hover { background: var(--hover); }
+.ap-item .ic { font-size: 0.95rem; flex-shrink: 0; width: 18px; text-align: center; }
+.ap-item .nm { flex: 1; font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-item .tm { font-size: 0.67rem; color: var(--text-faint); flex-shrink: 0; }
+.ap-item .tag { font-size: 0.59rem; padding: 1px 6px; border-radius: 5px; font-weight: 600; flex-shrink: 0; }
+.ap-item .tag.rep { background: var(--accent-soft); color: var(--accent); }
+.ap-item .tag.data { background: #e7f6ed; color: var(--success); }
+.ap-sec.muted { border-top: 1px solid var(--border-soft); }
+.ap-sec.muted .nm { color: var(--text-dim); }
+.ap-empty { padding: 16px; text-align: center; color: var(--text-faint); font-size: 0.78rem; }
+.ses-artifact-count {
+  font-size: 0.62rem; background: var(--accent-soft); color: var(--accent);
+  border-radius: 20px; padding: 0 6px; font-weight: 600; flex-shrink: 0; align-self: center;
 }
 .chat-session {
   display: flex; flex-direction: column; gap: 16px; min-height: 100%;
@@ -764,11 +806,11 @@ body.resizing iframe { pointer-events: none; }
 <div id="main">
   <!-- Rail: vertical nav -->
   <div id="rail">
-    <button class="rail-item active" data-tab="sessions" onclick="switchSidebarTab('sessions')" title="会话"><span class="rail-ic">💬</span><span class="rail-lb">会话</span></button>
-    <button class="rail-item" data-tab="files" onclick="switchSidebarTab('files')" title="文件"><span class="rail-ic">📁</span><span class="rail-lb">文件</span></button>
-    <button class="rail-item" data-tab="skills" onclick="switchSidebarTab('skills')" title="技能"><span class="rail-ic">🧩</span><span class="rail-lb">技能</span></button>
-    <button class="rail-item" data-tab="reports" onclick="switchSidebarTab('reports')" title="报告"><span class="rail-ic">📊</span><span class="rail-lb">报告</span></button>
-    <button class="rail-item" data-tab="cron" onclick="switchSidebarTab('cron')" title="定时任务"><span class="rail-ic">⏰</span><span class="rail-lb">定时</span></button>
+    <button class="rail-item active" data-tab="sessions" onclick="switchSidebarTab('sessions')" title="会话"><span class="rail-ic"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><span class="rail-lb">会话</span></button>
+    <button class="rail-item" data-tab="files" onclick="switchSidebarTab('files')" title="文件"><span class="rail-ic"><svg viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg></span><span class="rail-lb">文件</span></button>
+    <button class="rail-item" data-tab="skills" onclick="switchSidebarTab('skills')" title="技能"><span class="rail-ic"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6 7 18.2l1.9-5.8L4 8.8h6.1z"/></svg></span><span class="rail-lb">技能</span></button>
+    <button class="rail-item" data-tab="reports" onclick="switchSidebarTab('reports')" title="报告"><span class="rail-ic"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span class="rail-lb">报告</span></button>
+    <button class="rail-item" data-tab="cron" onclick="switchSidebarTab('cron')" title="定时任务"><span class="rail-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="rail-lb">定时</span></button>
   </div>
 
   <!-- Sidebar -->
@@ -835,6 +877,13 @@ body.resizing iframe { pointer-events: none; }
 
   <!-- Chat Panel -->
   <div id="chat-panel">
+    <div id="chat-artifacts-bar">
+      <div class="art-chip" onclick="toggleArtifactsPop(event)">
+        <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        本会话产出 <span class="b" id="art-count">0</span> <span style="font-size:.6rem;">▾</span>
+      </div>
+      <div class="art-pop" id="art-pop"></div>
+    </div>
     <div id="chat"></div>
     <div id="input-bar">
       <button id="attach-btn" onclick="document.getElementById('chat-upload-input').click()" title="上传附件">📎</button>
@@ -910,7 +959,8 @@ function getSes(sid) {
       typingEl: null, streamBubbleEl: null, streamBuffer: '',
       streamRateEl: null, _streamTextNode: null, streamTokenCount: 0, streamStartTime: 0,
       currentStepsGroup: null, stepsCounter: 0,
-      toolsUsed: [], skillsUsed: [], filesWrittenThisTurn: []
+      toolsUsed: [], skillsUsed: [], filesWrittenThisTurn: [],
+      sessionArtifacts: []  // {path, name} accumulated across the whole session
     });
   }
   return sesStore.get(sid);
@@ -1241,6 +1291,8 @@ function renderSessionList(sessions) {
         '<span class="session-name">' + escapeHtml(sid) + '</span>' +
         '<span class="session-time">' + updatedAt + '</span>' +
       '</div>' +
+      ((sesData && sesData.sessionArtifacts && sesData.sessionArtifacts.length)
+        ? '<span class="ses-artifact-count">📎' + sesData.sessionArtifacts.length + '</span>' : '') +
       '<div class="session-item-actions">' +
         '<button class="session-action-btn share" title="生成只读分享链接" onclick="shareSession(\'' + escapeHtml(sid) + '\', event)">🔗</button>' +
         '<button class="session-action-btn export" title="导出为 Markdown" onclick="exportSession(\'' + escapeHtml(sid) + '\', event)">↓</button>' +
@@ -1280,6 +1332,7 @@ function switchSession(sid) {
   // Update header WS dot and send button to reflect new session
   dot.className = (s.ws && s.ws.readyState === WebSocket.OPEN) ? 'connected' : '';
   sendBtn.disabled = s.busy;
+  renderArtifactsBar();
 
   // Scroll to bottom of newly visible session
   chat.scrollTop = chat.scrollHeight;
@@ -2150,6 +2203,7 @@ async function loadHistory(sid) {
     divider.textContent = '── 历史记录 (' + messages.length + ' 条) ──';
     chatEl.appendChild(divider);
 
+    var histPaths = [];
     messages.forEach(function(m) {
       var el = document.createElement('div');
       if (m.role === 'user') {
@@ -2165,8 +2219,11 @@ async function loadHistory(sid) {
           renderMarkdown(m.content) + '</div>';
         chatEl.appendChild(el);
         enhanceBubble(el.querySelector('.bubble'));
+        // Rebuild session artifacts from mentioned file paths (survives reload)
+        extractFilePathsFromText(m.content || '').forEach(function(p) { histPaths.push(p); });
       }
     });
+    addSessionArtifacts(sid, histPaths);
 
     var endDivider = document.createElement('div');
     endDivider.className = 'history-divider';
@@ -2251,7 +2308,9 @@ function routeMessage(sid, msg) {
     removeTyping();
     collapseCurrentSteps();
     if (!streamFinalize(msg.content)) appendBot(msg.content);
-    appendFileChips(mergeFilePaths(msg.content || '', s.filesWrittenThisTurn));
+    var turnPaths = mergeFilePaths(msg.content || '', s.filesWrittenThisTurn);
+    appendFileChips(turnPaths);
+    addSessionArtifacts(sid, turnPaths);
     s.filesWrittenThisTurn = [];
     setBusy(false);
     if (isBackground) { s.unread = true; updateSessionDot(sid); }
@@ -2303,6 +2362,7 @@ async function clearSession() {
   s.toolsUsed = []; s.skillsUsed = [];
   s.filesWrittenThisTurn = []; s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = ''; s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
+  s.sessionArtifacts = []; renderArtifactsBar();
   appendSystem('会话「' + sid + '」已清除');
   loadSessionList();
 }
@@ -2665,6 +2725,104 @@ function appendFileChips(paths) {
   chatAppend(row);
   scrollBottom();
 }
+
+// ── Session artifacts (files produced across the whole session) ──────────────
+var _RESULT_EXTS = ['md','markdown','docx','doc','pdf','csv','xlsx','xls','pptx','ppt','html'];
+function isResultDoc(path) {
+  var name = path.split('/').pop();
+  if (name.charAt(0) === '_' || name.charAt(0) === '.') return false;  // hidden / temp
+  var ext = name.indexOf('.') >= 0 ? name.split('.').pop().toLowerCase() : '';
+  return _RESULT_EXTS.indexOf(ext) >= 0;
+}
+function artifactMeta(path) {
+  var name = path.split('/').pop();
+  var ext = name.indexOf('.') >= 0 ? name.split('.').pop().toLowerCase() : '';
+  if (['md','markdown'].indexOf(ext) >= 0) return { ic: '📊', tag: '报告', tagCls: 'rep' };
+  if (['csv','xlsx','xls'].indexOf(ext) >= 0) return { ic: '📈', tag: '数据', tagCls: 'data' };
+  if (['docx','doc','pdf','pptx','ppt'].indexOf(ext) >= 0) return { ic: '📄', tag: '文档', tagCls: 'rep' };
+  if (['py'].indexOf(ext) >= 0) return { ic: '🐍', tag: '', tagCls: '' };
+  if (['json'].indexOf(ext) >= 0) return { ic: '📦', tag: '', tagCls: '' };
+  return { ic: '📄', tag: '', tagCls: '' };
+}
+function addSessionArtifacts(sid, paths) {
+  if (!paths || !paths.length) return;
+  var s = getSes(sid);
+  var seen = {};
+  s.sessionArtifacts.forEach(function(a) { seen[a.path] = true; });
+  paths.forEach(function(p) {
+    if (!p || seen[p]) return;
+    seen[p] = true;
+    s.sessionArtifacts.push({ path: p, name: p.split('/').pop() });
+  });
+  if (sid === activeSessionId) renderArtifactsBar();
+  updateSessionArtifactCount(sid);
+}
+function renderArtifactsBar() {
+  var bar = document.getElementById('chat-artifacts-bar');
+  var s = getSes(activeSessionId);
+  var n = s.sessionArtifacts.length;
+  document.getElementById('art-count').textContent = n;
+  bar.classList.toggle('show', n > 0);
+  if (n === 0) document.getElementById('art-pop').classList.remove('show');
+}
+function toggleArtifactsPop(e) {
+  if (e) e.stopPropagation();
+  var pop = document.getElementById('art-pop');
+  if (pop.classList.contains('show')) { pop.classList.remove('show'); return; }
+  renderArtifactsPop();
+  pop.classList.add('show');
+}
+function renderArtifactsPop() {
+  var pop = document.getElementById('art-pop');
+  var items = getSes(activeSessionId).sessionArtifacts;
+  var results = items.filter(function(a) { return isResultDoc(a.path); });
+  var process = items.filter(function(a) { return !isResultDoc(a.path); });
+  var html = '<div class="ap-head"><span>本会话产出（' + items.length + '）</span>' +
+    '<span class="all" onclick="switchSidebarTab(\'files\');toggleArtifactsPop(event)">全部文件 ↗</span></div>';
+  function rows(list) {
+    return list.map(function(a) {
+      var m = artifactMeta(a.path);
+      var tag = m.tag ? '<span class="tag ' + m.tagCls + '">' + m.tag + '</span>' : '';
+      return '<div class="ap-item" onclick="openArtifact(\'' + escapeAttr(a.path) + '\')">' +
+        '<span class="ic">' + m.ic + '</span><span class="nm" title="' + escapeAttr(a.path) + '">' +
+        escapeHtml(a.name) + '</span>' + tag + '</div>';
+    }).join('');
+  }
+  if (results.length) html += '<div class="ap-grp">📌 结果文档 · ' + results.length + '</div>' + rows(results);
+  if (process.length) html += '<div class="ap-sec muted"><div class="ap-grp">⚙️ 过程文件 · ' + process.length + '</div>' + rows(process) + '</div>';
+  if (!items.length) html += '<div class="ap-empty">本会话还没有产出文件</div>';
+  pop.innerHTML = html;
+}
+function openArtifact(path) {
+  openFile(path, path.split('/').pop());
+  document.getElementById('art-pop').classList.remove('show');
+}
+function updateSessionArtifactCount(sid) {
+  var item = sessionList.querySelector('[data-sid="' + escapeAttr(sid) + '"]');
+  if (!item) return;
+  var s = sesStore.get(sid);
+  var n = s ? s.sessionArtifacts.length : 0;
+  var badge = item.querySelector('.ses-artifact-count');
+  if (n > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'ses-artifact-count';
+      var info = item.querySelector('.session-item-info');
+      if (info) info.parentNode.insertBefore(badge, info.nextSibling);
+    }
+    badge.textContent = '📎' + n;
+  } else if (badge) {
+    badge.remove();
+  }
+}
+// Close the artifacts popover when clicking elsewhere
+document.addEventListener('click', function(e) {
+  var bar = document.getElementById('chat-artifacts-bar');
+  if (bar && !bar.contains(e.target)) {
+    var pop = document.getElementById('art-pop');
+    if (pop) pop.classList.remove('show');
+  }
+});
 
 function showTyping() {
   var s = getSes(currentSessionId);
