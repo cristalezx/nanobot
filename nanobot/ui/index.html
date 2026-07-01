@@ -16,6 +16,7 @@
   --bg: #ffffff;            /* page / inset surfaces */
   --surface: #ffffff;       /* cards, bubbles, inputs */
   --sidebar: #f6f6f8;       /* light gray sidebar */
+  --rail: #efeff3;          /* vertical nav rail (slightly darker) */
   --hover: #ececf0;         /* hover row bg */
   --active: #e4e4ec;        /* active row bg */
   --border: #ececef;        /* hairline borders */
@@ -127,18 +128,41 @@ header h1 { font-size: 1.1rem; white-space: nowrap; font-weight: 650; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe { pointer-events: none; }
 
-/* ── Sidebar Tabs ── */
-#sidebar-tabs {
-  display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0;
+/* ── Rail (vertical nav) ── */
+#rail {
+  width: 60px; background: var(--rail); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: center; padding-top: 6px;
+  flex-shrink: 0;
 }
-.tab-btn {
-  flex: 1; background: none; border: none; color: var(--text-dim);
-  padding: 10px 0; font-size: 0.78rem; cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
+.rail-item {
+  width: 100%; padding: 8px 0 6px; display: flex; flex-direction: column;
+  align-items: center; gap: 3px; cursor: pointer; color: var(--text-dim);
+  position: relative; border: none; background: transparent;
+  transition: color 0.15s, background 0.15s;
 }
-.tab-btn:hover { color: var(--text); }
-.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.rail-item:hover { background: var(--hover); color: var(--text); }
+.rail-item.active { color: var(--accent); }
+.rail-item.active::before {
+  content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--accent);
+}
+.rail-ic { font-size: 1.12rem; line-height: 1; }
+.rail-lb { font-size: 0.6rem; }
+.rail-sp { flex: 1; }
+.rail-badge {
+  position: absolute; top: 5px; right: 11px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--danger); border: 1.5px solid var(--rail);
+}
+
+/* ── Sidebar Tabs (legacy, replaced by #rail) ── */
+#sidebar-tabs { display: none; }
+
+/* Placeholder panel for not-yet-built sections */
+.panel-placeholder {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  text-align: center; color: var(--text-faint); font-size: 0.85rem; padding: 24px;
+  line-height: 1.7;
+}
 
 /* ── Sidebar Panels (shared) ── */
 .sidebar-panel {
@@ -738,14 +762,17 @@ body.resizing iframe { pointer-events: none; }
 </header>
 
 <div id="main">
+  <!-- Rail: vertical nav -->
+  <div id="rail">
+    <button class="rail-item active" data-tab="sessions" onclick="switchSidebarTab('sessions')" title="会话"><span class="rail-ic">💬</span><span class="rail-lb">会话</span></button>
+    <button class="rail-item" data-tab="files" onclick="switchSidebarTab('files')" title="文件"><span class="rail-ic">📁</span><span class="rail-lb">文件</span></button>
+    <button class="rail-item" data-tab="skills" onclick="switchSidebarTab('skills')" title="技能"><span class="rail-ic">🧩</span><span class="rail-lb">技能</span></button>
+    <button class="rail-item" data-tab="reports" onclick="switchSidebarTab('reports')" title="报告"><span class="rail-ic">📊</span><span class="rail-lb">报告</span></button>
+    <button class="rail-item" data-tab="cron" onclick="switchSidebarTab('cron')" title="定时任务"><span class="rail-ic">⏰</span><span class="rail-lb">定时</span></button>
+  </div>
+
   <!-- Sidebar -->
   <div id="sidebar">
-    <!-- Tabs -->
-    <div id="sidebar-tabs">
-      <button class="tab-btn active" onclick="switchSidebarTab('sessions')">会话</button>
-      <button class="tab-btn" onclick="switchSidebarTab('files')">文件</button>
-      <button class="tab-btn" onclick="switchSidebarTab('skills')">技能</button>
-    </div>
 
     <!-- Sessions Panel -->
     <div id="panel-sessions" class="sidebar-panel active">
@@ -790,6 +817,16 @@ body.resizing iframe { pointer-events: none; }
         </div>
       </div>
       <div id="skills-list"></div>
+    </div>
+
+    <!-- Reports Panel (built in a later batch) -->
+    <div id="panel-reports" class="sidebar-panel">
+      <div class="panel-placeholder">📊 报告管理<br>即将上线</div>
+    </div>
+
+    <!-- Cron Panel (built in a later batch) -->
+    <div id="panel-cron" class="sidebar-panel">
+      <div class="panel-placeholder">⏰ 定时任务<br>即将上线</div>
     </div>
   </div>
 
@@ -1142,13 +1179,13 @@ async function switchModel() {
 
 // ── Sidebar tabs ───────────────────────────────────────────────────────────
 function switchSidebarTab(tab) {
-  var tabs = ['sessions', 'files', 'skills'];
-  var tabBtns = document.querySelectorAll('#sidebar-tabs .tab-btn');
-  tabs.forEach(function(t, i) {
+  var tabs = ['sessions', 'files', 'skills', 'reports', 'cron'];
+  tabs.forEach(function(t) {
     var panel = document.getElementById('panel-' + t);
-    var active = t === tab;
-    tabBtns[i].classList.toggle('active', active);
-    panel.classList.toggle('active', active);
+    if (panel) panel.classList.toggle('active', t === tab);
+  });
+  document.querySelectorAll('#rail .rail-item').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
   });
   if (tab === 'files') {
     loadFiles(currentFilePath || '');
