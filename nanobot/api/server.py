@@ -379,6 +379,14 @@ def create_app(
                 return {"token": token, "required": True}
             raise HTTPException(status_code=403, detail="Invalid password")
 
+    @app.post("/v1/auth/logout")
+    async def logout(request: Request):
+        """Invalidate the current UI session token."""
+        token = request.headers.get("X-Token") or request.query_params.get("token")
+        if token:
+            _tokens.pop(token, None)
+        return {"ok": True}
+
     @app.get("/v1/auth/required")
     async def auth_required():
         return {"required": bool(password or _is_multi_user), "multi_user": _is_multi_user}

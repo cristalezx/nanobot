@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nanobot streaming demo</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    background: #f7f7fb;
+    color: #20212a;
+  }
+  header {
+    height: 56px;
+    padding: 0 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #e7e7ef;
+    background: #fff;
+  }
+  h1 { font-size: 16px; margin: 0; }
+  .actions { display: flex; gap: 8px; }
+  select {
+    height: 32px;
+    border: 1px solid #dedeeb;
+    border-radius: 8px;
+    background: #fff;
+    padding: 0 10px;
+    color: #373846;
+    font-weight: 600;
+  }
+  button {
+    height: 32px;
+    border: 1px solid #dedeeb;
+    border-radius: 8px;
+    background: #fff;
+    color: #373846;
+    padding: 0 12px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button.primary {
+    background: #5c5cff;
+    border-color: #5c5cff;
+    color: #fff;
+  }
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    height: calc(100vh - 56px);
+    background: #e7e7ef;
+  }
+  section {
+    background: #fff;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-head {
+    height: 48px;
+    padding: 0 18px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #eeeeF5;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .chat {
+    flex: 1;
+    overflow: auto;
+    padding: 28px max(18px, calc((100% - 680px) / 2));
+  }
+  .msg {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+  .avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #5c5cff, #8c78ff);
+    flex: 0 0 auto;
+  }
+  .bubble {
+    max-width: 760px;
+    border: 1px solid #ececf4;
+    border-radius: 14px;
+    padding: 13px 15px;
+    line-height: 1.65;
+    font-size: 14px;
+    white-space: pre-wrap;
+    background: #fff;
+  }
+  .bubble strong { font-weight: 700; }
+  .bubble table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 13px;
+    white-space: normal;
+  }
+  .bubble th, .bubble td {
+    border-bottom: 1px solid #ececf4;
+    padding: 7px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .bubble th { color: #5c5cff; background: #f4f3ff; font-weight: 700; }
+  .bubble p { margin: 0 0 10px; }
+  .bubble ul { margin: 8px 0 10px 18px; padding: 0; }
+  .old .bubble {
+    transition: none;
+  }
+  .new .bubble {
+    will-change: contents;
+  }
+  .caret::after {
+    content: "";
+    display: inline-block;
+    width: 7px;
+    height: 1.2em;
+    margin-left: 2px;
+    vertical-align: -0.18em;
+    background: #5c5cff;
+    animation: blink 1s steps(2, start) infinite;
+  }
+  .note {
+    padding: 10px 18px;
+    border-top: 1px solid #eeeeF5;
+    color: #777787;
+    font-size: 12px;
+  }
+  .jump {
+    position: sticky;
+    bottom: 14px;
+    margin: 0 auto;
+    display: none;
+    height: 30px;
+    border-radius: 999px;
+    box-shadow: 0 8px 24px rgba(34, 34, 60, .14);
+  }
+  .jump.show { display: block; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; height: auto; }
+    section { min-height: 60vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>nanobot 流式效果 Demo</h1>
+  <div class="actions">
+    <select id="lengthMode">
+      <option value="normal">普通输出</option>
+      <option value="long" selected>很长输出</option>
+      <option value="huge">超长输出</option>
+    </select>
+    <button onclick="resetDemo()">重置</button>
+    <button class="primary" onclick="runDemo()">播放</button>
+  </div>
+</header>
+<main>
+  <section class="old">
+    <div class="panel-head">旧效果：每个 token 直接写 DOM，视觉像瀑布</div>
+    <div class="chat" id="oldChat"></div>
+    <div class="note">问题：高频 DOM 更新、持续拉到底、阅读中的文字一直跳。</div>
+  </section>
+  <section class="new">
+    <div class="panel-head">新效果：按帧合并刷新，结束后再渲染 Markdown</div>
+    <div class="chat" id="newChat"></div>
+    <div class="note">策略：requestAnimationFrame 批量刷新；用户滚动阅读时不强制吸底。</div>
+  </section>
+</main>
+<script>
+const baseSample = `我会把这个问题拆成三层看：
+
+**当前真正难看的点**不是慢，而是 Markdown 源码直接暴露：
+
+| 场景 | 旧体验 | 新体验 |
+| --- | --- | --- |
+| 粗体 | 看到 **星号** 一路打印 | 直接看到加粗文字 |
+| 表格 | 看到很多 \`|\` 和 \`---\` | 流式中就变成表格 |
+| 列表 | 符号和文本一起乱跳 | 稳定成段出现 |
+
+所以改法不是等最后才渲染，而是分两步：
+
+1. 流式阶段做**轻量 Markdown 排版**，先保证能读。
+2. 结束后再做完整 Markdown、代码高亮、Mermaid 等富渲染。
+
+这样用户会感觉内容是在自然生长，而不是一屏文字从上往下砸下来。`;
+
+function buildSample() {
+  const mode = document.getElementById("lengthMode").value;
+  const repeats = mode === "huge" ? 14 : mode === "long" ? 7 : 1;
+  const blocks = [];
+  for (let i = 1; i <= repeats; i++) {
+    blocks.push(`## 第 ${i} 组分析
+
+${baseSample}
+
+| 指标 | 观察 | 建议 |
+| --- | --- | --- |
+| 可读性 | **流式阶段**不能暴露 Markdown 源码 | 先做轻量渲染 |
+| 滚动 | 用户上滚时不应该被拉回底部 | 暂停自动吸底 |
+| 表格 | 管道符在中间态非常干扰 | 即时转成表格 |
+| 完成态 | 最终 Markdown 已经没问题 | 保持完整渲染 |
+
+补充说明：这一段故意写得比较长，用来模拟真实 agent 在解释需求、列出方案、比较 tradeoff、生成多段结论时的输出。用户应该可以在输出过程中停下来阅读任意一段，而不是被页面持续拖到最新 token。`);
+  }
+  return blocks.join("\n\n---\n\n");
+}
+
+let timers = [];
+
+function makeBubble(root) {
+  root.innerHTML = "";
+  const msg = document.createElement("div");
+  msg.className = "msg";
+  msg.innerHTML = '<div class="avatar"></div><div class="bubble caret"></div>';
+  root.appendChild(msg);
+  return msg.querySelector(".bubble");
+}
+
+function resetDemo() {
+  timers.forEach(clearTimeout);
+  timers = [];
+  makeBubble(document.getElementById("oldChat")).textContent = "";
+  makeBubble(document.getElementById("newChat")).textContent = "";
+}
+
+function runOld() {
+  const chat = document.getElementById("oldChat");
+  const bubble = makeBubble(chat);
+  const sample = buildSample();
+  let buf = "";
+  Array.from(sample).forEach((ch, i) => {
+    timers.push(setTimeout(() => {
+      buf += ch;
+      bubble.textContent = buf;
+      chat.scrollTop = chat.scrollHeight;
+    }, i * 13));
+  });
+}
+
+function runNew() {
+  const chat = document.getElementById("newChat");
+  const bubble = makeBubble(chat);
+  const sample = buildSample();
+  const jump = document.createElement("button");
+  jump.className = "jump";
+  jump.textContent = "回到底部";
+  jump.onclick = () => {
+    chat.scrollTop = chat.scrollHeight;
+    stick = true;
+    jump.classList.remove("show");
+  };
+  chat.appendChild(jump);
+  let buf = "";
+  let rendered = "";
+  let pending = false;
+  let stick = true;
+
+  function nearBottom() {
+    return chat.scrollHeight - chat.scrollTop - chat.clientHeight < 100;
+  }
+
+  function renderLiveMarkdown(text) {
+    const lines = text.split("\n");
+    let html = "";
+    let i = 0;
+    while (i < lines.length) {
+      if (i + 1 < lines.length && /^\s*\|(.+)\|\s*$/.test(lines[i]) && /^\s*\|[\s:|\-]+\|\s*$/.test(lines[i + 1])) {
+        const head = lines[i].trim().slice(1, -1).split("|").map(s => s.trim());
+        i += 2;
+        const rows = [];
+        while (i < lines.length && /^\s*\|(.+)\|\s*$/.test(lines[i])) {
+          rows.push(lines[i].trim().slice(1, -1).split("|").map(s => s.trim()));
+          i++;
+        }
+        html += "<table><thead><tr>" + head.map(c => "<th>" + inline(c) + "</th>").join("") +
+          "</tr></thead><tbody>" + rows.map(r => "<tr>" + r.map(c => "<td>" + inline(c) + "</td>").join("") + "</tr>").join("") +
+          "</tbody></table>";
+        continue;
+      }
+      if (/^\s*\d+\.\s+/.test(lines[i])) {
+        html += "<ul>";
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+          html += "<li>" + inline(lines[i].replace(/^\s*\d+\.\s+/, "")) + "</li>";
+          i++;
+        }
+        html += "</ul>";
+        continue;
+      }
+      html += lines[i] ? "<p>" + inline(lines[i]) + "</p>" : "<br>";
+      i++;
+    }
+    return html;
+  }
+
+  function inline(text) {
+    return text
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  }
+
+  function flush() {
+    pending = false;
+    if (rendered !== buf) {
+      bubble.innerHTML = renderLiveMarkdown(buf);
+      rendered = buf;
+    }
+    if (stick) {
+      chat.scrollTop = chat.scrollHeight;
+      jump.classList.remove("show");
+    } else {
+      jump.classList.add("show");
+    }
+  }
+
+  Array.from(sample).forEach((ch, i) => {
+    timers.push(setTimeout(() => {
+      buf += ch;
+      if (!nearBottom()) stick = false;
+      if (!pending) {
+        pending = true;
+        requestAnimationFrame(flush);
+      }
+    }, i * 13));
+  });
+
+  timers.push(setTimeout(() => {
+    bubble.classList.remove("caret");
+  }, sample.length * 13 + 120));
+}
+
+function runDemo() {
+  resetDemo();
+  runOld();
+  runNew();
+}
+
+resetDemo();
+</script>
+</body>
+</html>

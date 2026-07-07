@@ -71,6 +71,17 @@ header {
   border-bottom: 1px solid var(--border); z-index: 10;
 }
 header h1 { font-size: 1.1rem; white-space: nowrap; font-weight: 650; }
+.user-chip {
+  display: none; align-items: center; gap: 6px; color: var(--text-faint);
+  font-size: 0.78rem; border: 1px solid transparent; border-radius: 8px;
+  padding: 3px 4px 3px 8px;
+}
+.user-chip.show { display: inline-flex; }
+.logout-btn {
+  border: none; background: transparent; color: var(--text-faint); cursor: pointer;
+  border-radius: 6px; padding: 3px 6px; font-size: 0.72rem;
+}
+.logout-btn:hover { background: var(--hover); color: var(--text); }
 .header-spacer { flex: 1; }
 #model-select {
   background: var(--bg); border: 1px solid var(--border); color: var(--text);
@@ -416,7 +427,7 @@ body.resizing iframe { pointer-events: none; }
 /* ── Chat Panel ── */
 #chat-panel {
   flex: 1; display: flex; flex-direction: column; overflow: hidden;
-  min-width: 0;
+  min-width: 0; position: relative;
 }
 #conversation-bar {
   flex-shrink: 0; height: 48px; padding: 0 18px;
@@ -443,6 +454,14 @@ body.resizing iframe { pointer-events: none; }
 #chat {
   flex: 1; overflow-y: auto;
 }
+#jump-bottom {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 86px; z-index: 30;
+  display: none; height: 30px; border: 1px solid #dedeee; background: #fff;
+  color: var(--accent); border-radius: 999px; padding: 0 12px;
+  box-shadow: 0 8px 26px rgba(40,40,80,.14); cursor: pointer;
+  font-size: 0.74rem; font-weight: 650;
+}
+#jump-bottom.show { display: block; }
 
 /* ── Reports panel ── */
 #reports-header {
@@ -620,8 +639,11 @@ body.resizing iframe { pointer-events: none; }
 .msg.user .bubble p > code, .msg.user .bubble li > code { background: rgba(255,255,255,.18); color: #fff; }
 .msg.user .bubble code { color: #fff; }
 .msg.user .bubble a { color: #fff; text-decoration: underline; }
-/* Live-streaming bubble: show raw text with a blinking caret */
-.bubble.streaming { white-space: pre-wrap; position: relative; }
+/* Live-streaming bubble: lightweight-render Markdown while final rich render waits. */
+.bubble.streaming { position: relative; }
+.stream-live { white-space: normal; }
+.stream-live p { margin: 0 0 8px; }
+.stream-live p:last-child { margin-bottom: 0; }
 .bubble.streaming::after {
   content: '▋'; color: var(--accent); margin-left: 1px;
   animation: caret-blink 1s steps(2, start) infinite;
@@ -947,7 +969,10 @@ body.resizing iframe { pointer-events: none; }
   <button id="toggle-sidebar" onclick="toggleSidebar()" title="切换侧边栏">☰</button>
   <div id="status-dot" title="WebSocket 状态"></div>
   <h1>🐕 perrobot</h1>
-  <span id="header-user" style="font-size:0.78rem;color:var(--text-faint);display:none;"></span>
+  <span id="header-user" class="user-chip">
+    <span id="header-user-name"></span>
+    <button class="logout-btn" onclick="logout()" title="退出登录">退出</button>
+  </span>
   <div class="header-spacer"></div>
   <select id="model-select" onchange="switchModel()" title="切换模型" style="display:none"></select>
   <input id="session-input" type="hidden" value="default">
@@ -1071,6 +1096,7 @@ body.resizing iframe { pointer-events: none; }
     </div>
     </div>
     <div id="chat"></div>
+    <button id="jump-bottom" onclick="jumpToBottom()">回到底部</button>
     <div id="ref-bar" style="display:none;"></div>
     <div id="input-bar">
       <button id="attach-btn" onclick="document.getElementById('chat-upload-input').click()" title="上传附件">
@@ -1211,9 +1237,11 @@ function getSes(sid) {
       ws: null, busy: false, unread: false, chatEl: el,
       typingEl: null, streamBubbleEl: null, streamBuffer: '',
       streamRateEl: null, _streamTextNode: null, streamTokenCount: 0, streamStartTime: 0,
+      streamFlushPending: false, streamLastRendered: '', streamShouldStick: true,
       currentStepsGroup: null, stepsCounter: 0,
       toolsUsed: [], skillsUsed: [], filesWrittenThisTurn: [],
-      sessionArtifacts: [],  // {path, name} accumulated across the whole session
+      sessionArtifacts: [],  // {path, name, kind} accumulated across the whole session
+      sessionInputs: [],  // uploaded or referenced input materials
       referencedReport: null  // {path, name, snapshot} — report referenced for follow-up
     });
   }
@@ -1239,6 +1267,7 @@ const dot         = document.getElementById('status-dot');
 const sessInput   = document.getElementById('session-input');
 const sidebar     = document.getElementById('sidebar');
 const sessionList = document.getElementById('session-list');
+let jumpBtn       = document.getElementById('jump-bottom');
 
 // ── Panel resizing (drag handles) ──────────────────────────────────────────
 function setupResizer(handleId, getEl, opts) {
@@ -1348,7 +1377,11 @@ async function boot() {
     }
     if (authToken) {
       var probe = await apiFetch('/v1/sessions');
-      if (probe.ok) { init(); return; }
+      if (probe.ok) {
+        if (!authUsername && !_isMultiUser) authUsername = '已登录';
+        init();
+        return;
+      }
       authToken = '';
       authUsername = '';
       sessionStorage.removeItem('nanobotToken');
@@ -1383,12 +1416,37 @@ function _setAuthUser(username) {
   authUsername = username || '';
   sessionStorage.setItem('nanobotUser', authUsername);
   var el = document.getElementById('header-user');
+  var nameEl = document.getElementById('header-user-name');
   if (authUsername) {
-    el.textContent = '👤 ' + authUsername;
-    el.style.display = '';
+    nameEl.textContent = authUsername;
+    el.classList.add('show');
   } else {
-    el.style.display = 'none';
+    nameEl.textContent = '';
+    el.classList.remove('show');
   }
+}
+
+async function logout() {
+  try {
+    await apiFetch('/v1/auth/logout', { method: 'POST' });
+  } catch (_) {}
+  sesStore.forEach(function(s) {
+    if (s.ws) {
+      s.ws.onclose = null;
+      try { s.ws.close(); } catch (_) {}
+      s.ws = null;
+    }
+  });
+  authToken = '';
+  authUsername = '';
+  sessionStorage.removeItem('nanobotToken');
+  sessionStorage.removeItem('nanobotUser');
+  _setAuthUser('');
+  dot.className = '';
+  sendBtn.disabled = false;
+  document.getElementById('auth-password').value = '';
+  document.getElementById('auth-error').textContent = '';
+  showAuthModal();
 }
 
 async function submitAuth() {
@@ -1407,7 +1465,7 @@ async function submitAuth() {
       var data = await res.json();
       authToken = data.token || '';
       sessionStorage.setItem('nanobotToken', authToken);
-      _setAuthUser(data.username || '');
+      _setAuthUser(data.username || (_isMultiUser ? '' : '已登录'));
       document.getElementById('auth-overlay').classList.add('hidden');
       init();
     } else {
@@ -2056,6 +2114,7 @@ async function uploadChatAttachments(fileList) {
   document.getElementById('chat-upload-input').value = '';
   btn.disabled = false;
   if (!paths.length) { appendSystem('附件上传失败'); return; }
+  addSessionInputs(activeSessionId, paths);
   // Prepend a reference line to the message input.
   var ref = '附件：' + paths.join('、') + '\n';
   input.value = ref + input.value;
@@ -2680,6 +2739,7 @@ function connectSession(sid) {
       s.streamBubbleEl.innerHTML = renderMarkdown(s.streamBuffer);
       enhanceBubble(s.streamBubbleEl);
       s.streamBubbleEl = null; s._streamTextNode = null; s.streamBuffer = '';
+      s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
       s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
     }
     s.busy = false;
@@ -2766,6 +2826,9 @@ function sendMessage() {
   s.filesWrittenThisTurn = [];
   s.streamBubbleEl = null;
   s.streamBuffer = '';
+  s.streamLastRendered = '';
+  s.streamFlushPending = false;
+  s.streamShouldStick = true;
   showTyping();
   setBusy(true);
 }
@@ -2789,7 +2852,10 @@ async function clearSession() {
   s.toolsUsed = []; s.skillsUsed = [];
   s.filesWrittenThisTurn = []; s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = ''; s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
-  s.sessionArtifacts = []; renderArtifactsBar();
+  s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
+  s.sessionInputs = [];
+  s.sessionArtifacts = [];
+  renderArtifactsBar();
   s.referencedReport = null; renderRefChip();
   appendSystem('当前对话上下文已清空');
   loadSessionList();
@@ -2818,12 +2884,96 @@ function setBusy(v) {
 }
 
 function scrollBottom() {
-  if (currentSessionId === activeSessionId) chat.scrollTop = chat.scrollHeight;
+  if (currentSessionId !== activeSessionId) return;
+  if (isNearChatBottom()) {
+    chat.scrollTop = chat.scrollHeight;
+    setJumpVisible(false);
+  } else {
+    setJumpVisible(true);
+  }
 }
+
+function isNearChatBottom() {
+  return chat.scrollHeight - chat.scrollTop - chat.clientHeight < 120;
+}
+
+function ensureJumpButton() {
+  var panel = document.getElementById('chat-panel');
+  if (jumpBtn && jumpBtn.parentNode === panel) return jumpBtn;
+  jumpBtn = document.getElementById('jump-bottom');
+  if (!jumpBtn) {
+    jumpBtn = document.createElement('button');
+    jumpBtn.id = 'jump-bottom';
+    jumpBtn.textContent = '回到底部';
+    jumpBtn.onclick = jumpToBottom;
+  }
+  panel.appendChild(jumpBtn);
+  return jumpBtn;
+}
+
+function setJumpVisible(visible) {
+  ensureJumpButton().classList.toggle('show', !!visible);
+}
+
+function jumpToBottom() {
+  chat.scrollTop = chat.scrollHeight;
+  setJumpVisible(false);
+  var s = getSes(activeSessionId);
+  s.streamShouldStick = true;
+}
+
+chat.addEventListener('scroll', function() {
+  setJumpVisible(!isNearChatBottom());
+  if (!isNearChatBottom()) {
+    getSes(activeSessionId).streamShouldStick = false;
+  }
+});
 
 function renderMarkdown(md) {
   if (typeof marked === 'undefined') return escapeHtml(md || '');
   return marked.parse(md || '');
+}
+
+function renderLiveMarkdown(text) {
+  var lines = String(text || '').split('\n');
+  var html = '';
+  var i = 0;
+  while (i < lines.length) {
+    if (i + 1 < lines.length && /^\s*\|(.+)\|\s*$/.test(lines[i]) && /^\s*\|[\s:|\-]+\|\s*$/.test(lines[i + 1])) {
+      var head = lines[i].trim().slice(1, -1).split('|').map(function(s) { return s.trim(); });
+      i += 2;
+      var rows = [];
+      while (i < lines.length && /^\s*\|(.+)\|\s*$/.test(lines[i])) {
+        rows.push(lines[i].trim().slice(1, -1).split('|').map(function(s) { return s.trim(); }));
+        i++;
+      }
+      html += '<table><thead><tr>' + head.map(function(c) { return '<th>' + renderLiveInline(c) + '</th>'; }).join('') +
+        '</tr></thead><tbody>' + rows.map(function(r) {
+          return '<tr>' + r.map(function(c) { return '<td>' + renderLiveInline(c) + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody></table>';
+      continue;
+    }
+    if (/^\s*(?:[-*+]|\d+\.)\s+/.test(lines[i])) {
+      var ordered = /^\s*\d+\.\s+/.test(lines[i]);
+      html += ordered ? '<ol>' : '<ul>';
+      while (i < lines.length && (ordered ? /^\s*\d+\.\s+/.test(lines[i]) : /^\s*[-*+]\s+/.test(lines[i]))) {
+        html += '<li>' + renderLiveInline(lines[i].replace(/^\s*(?:[-*+]|\d+\.)\s+/, '')) + '</li>';
+        i++;
+      }
+      html += ordered ? '</ol>' : '</ul>';
+      continue;
+    }
+    html += lines[i] ? '<p>' + renderLiveInline(lines[i]) + '</p>' : '<br>';
+    i++;
+  }
+  return html;
+}
+
+function renderLiveInline(text) {
+  return escapeHtml(text)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*\*/g, '');
 }
 
 // Post-process a rendered bubble: render mermaid diagrams + highlight code.
@@ -2904,8 +3054,9 @@ function streamToken(delta) {
     avatar.textContent = '🐕';
     var bubble = document.createElement('div');
     bubble.className = 'bubble streaming';
-    // Dedicated text node keeps text separate from the rate div
-    var textNode = document.createTextNode('');
+    // Dedicated live-render node keeps content separate from the rate div.
+    var textNode = document.createElement('div');
+    textNode.className = 'stream-live';
     var rateEl = document.createElement('div');
     rateEl.className = 'stream-rate';
     bubble.appendChild(textNode);
@@ -2917,20 +3068,40 @@ function streamToken(delta) {
     s._streamTextNode = textNode;
     s.streamRateEl = rateEl;
     s.streamBuffer = '';
+    s.streamLastRendered = '';
+    s.streamFlushPending = false;
+    s.streamShouldStick = isNearChatBottom();
     s.streamTokenCount = 0;
     s.streamStartTime = Date.now();
   }
   s.streamBuffer += delta;
   s.streamTokenCount++;
-  s._streamTextNode.textContent = s.streamBuffer;
-  // Refresh rate every 5 tokens
-  if (s.streamTokenCount % 5 === 0) {
-    var elapsed = (Date.now() - s.streamStartTime) / 1000;
-    if (elapsed > 0.2) {
-      s.streamRateEl.textContent = Math.round(s.streamTokenCount / elapsed) + ' tok/s';
-    }
+  s.streamShouldStick = s.streamShouldStick && isNearChatBottom();
+  if (!s.streamFlushPending) {
+    s.streamFlushPending = true;
+    requestAnimationFrame(function() { flushStream(currentSessionId); });
   }
-  scrollBottom();
+}
+
+function flushStream(sid) {
+  var prevSid = currentSessionId;
+  currentSessionId = sid;
+  var s = getSes(sid);
+  s.streamFlushPending = false;
+  if (!s.streamBubbleEl || !s._streamTextNode) {
+    currentSessionId = prevSid;
+    return;
+  }
+  if (s.streamLastRendered !== s.streamBuffer) {
+    s._streamTextNode.innerHTML = renderLiveMarkdown(s.streamBuffer);
+    s.streamLastRendered = s.streamBuffer;
+  }
+  var elapsed = (Date.now() - s.streamStartTime) / 1000;
+  if (elapsed > 0.35) {
+    s.streamRateEl.textContent = Math.round(s.streamTokenCount / elapsed) + ' tok/s';
+  }
+  if (sid === activeSessionId && s.streamShouldStick) scrollBottom();
+  currentSessionId = prevSid;
 }
 
 function streamCancel() {
@@ -2941,6 +3112,7 @@ function streamCancel() {
   }
   s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = '';
+  s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
   s.streamRateEl = null;
   s.streamTokenCount = 0; s.streamStartTime = 0;
 }
@@ -2948,14 +3120,20 @@ function streamCancel() {
 function streamFinalize(finalText) {
   var s = getSes(currentSessionId);
   if (!s.streamBubbleEl) return false;
+  var shouldScroll = s.streamShouldStick;
+  if (s.streamFlushPending && s._streamTextNode) {
+    s._streamTextNode.innerHTML = renderLiveMarkdown(s.streamBuffer);
+    s.streamFlushPending = false;
+  }
   s.streamBubbleEl.classList.remove('streaming');
   s.streamBubbleEl.innerHTML = renderMarkdown(finalText != null ? finalText : s.streamBuffer);
   enhanceBubble(s.streamBubbleEl);
   s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = '';
+  s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
   s.streamRateEl = null;
   s.streamTokenCount = 0; s.streamStartTime = 0;
-  scrollBottom();
+  if (shouldScroll) scrollBottom();
   return true;
 }
 
@@ -3127,6 +3305,7 @@ function mergeFilePaths(messageText, writtenPaths) {
     if (!seen.has(p)) { seen.add(p); out.push(p); }
   });
   writtenPaths.forEach(function(p) {
+    if (!isResultDoc(p)) return;
     if (!seen.has(p)) { seen.add(p); out.push(p); }
   });
   return out;
@@ -3180,15 +3359,34 @@ function addSessionArtifacts(sid, paths) {
   paths.forEach(function(p) {
     if (!p || seen[p]) return;
     seen[p] = true;
-    s.sessionArtifacts.push({ path: p, name: p.split('/').pop() });
+    s.sessionArtifacts.push({ path: p, name: p.split('/').pop(), kind: 'result' });
   });
   if (sid === activeSessionId) renderArtifactsBar();
   updateSessionArtifactCount(sid);
 }
+
+function addSessionInputs(sid, paths) {
+  if (!paths || !paths.length) return;
+  var s = getSes(sid);
+  var seen = {};
+  s.sessionInputs.forEach(function(a) { seen[a.path] = true; });
+  paths.forEach(function(p) {
+    if (!p || seen[p]) return;
+    seen[p] = true;
+    s.sessionInputs.push({ path: p, name: p.split('/').pop(), kind: 'input' });
+  });
+  if (sid === activeSessionId) renderArtifactsBar();
+  updateSessionArtifactCount(sid);
+}
+
+function sessionMaterialCount(s) {
+  return (s.sessionInputs ? s.sessionInputs.length : 0) + (s.sessionArtifacts ? s.sessionArtifacts.length : 0);
+}
+
 function renderArtifactsBar() {
   var bar = document.getElementById('chat-artifacts-bar');
   var s = getSes(activeSessionId);
-  var n = s.sessionArtifacts.length;
+  var n = sessionMaterialCount(s);
   document.getElementById('art-count').textContent = n;
   bar.classList.toggle('show', n > 0);
   if (n === 0) document.getElementById('art-pop').classList.remove('show');
@@ -3202,10 +3400,13 @@ function toggleArtifactsPop(e) {
 }
 function renderArtifactsPop() {
   var pop = document.getElementById('art-pop');
-  var items = getSes(activeSessionId).sessionArtifacts;
-  var results = items.filter(function(a) { return isResultDoc(a.path); });
-  var process = items.filter(function(a) { return !isResultDoc(a.path); });
-  var html = '<div class="ap-head"><span>本会话产出（' + items.length + '）</span>' +
+  var s = getSes(activeSessionId);
+  var inputs = s.sessionInputs || [];
+  var outputs = s.sessionArtifacts || [];
+  var results = outputs.filter(function(a) { return isResultDoc(a.path); });
+  var process = outputs.filter(function(a) { return !isResultDoc(a.path); });
+  var total = inputs.length + outputs.length;
+  var html = '<div class="ap-head"><span>材料与结果（' + total + '）</span>' +
     '<span class="all" onclick="switchSidebarTab(\'files\');toggleArtifactsPop(event)">全部文件 ↗</span></div>';
   function rows(list) {
     return list.map(function(a) {
@@ -3216,12 +3417,18 @@ function renderArtifactsPop() {
         escapeHtml(a.name) + '</span>' + tag + '</div>';
     }).join('');
   }
+  if (inputs.length) html += '<div class="ap-grp">当前材料 · ' + inputs.length + '</div>' + rows(inputs);
   if (results.length) html += '<div class="ap-grp">结果文档 · ' + results.length + '</div>' + rows(results);
   if (process.length) html += '<div class="ap-sec muted"><div class="ap-grp">过程文件 · ' + process.length + '</div>' + rows(process) + '</div>';
-  if (!items.length) html += '<div class="ap-empty">本会话还没有产出文件</div>';
+  if (!total) html += '<div class="ap-empty">本会话还没有材料或结果</div>';
   pop.innerHTML = html;
 }
 function openArtifact(path) {
+  if (path.indexOf('published/') === 0) {
+    openReport(path, path.split('/').pop());
+    document.getElementById('art-pop').classList.remove('show');
+    return;
+  }
   openFile(path, path.split('/').pop());
   document.getElementById('art-pop').classList.remove('show');
 }
@@ -3229,7 +3436,7 @@ function updateSessionArtifactCount(sid) {
   var item = sessionList.querySelector('[data-sid="' + escapeAttr(sid) + '"]');
   if (!item) return;
   var s = sesStore.get(sid);
-  var n = s ? s.sessionArtifacts.length : 0;
+  var n = s ? sessionMaterialCount(s) : 0;
   var badge = item.querySelector('.ses-artifact-count');
   if (n > 0) {
     if (!badge) {
@@ -3368,6 +3575,7 @@ function publishReportIdx(i, e) {
 function referenceReport(path, name, snapshot) {
   var s = getSes(activeSessionId);
   s.referencedReport = { path: path, name: name, snapshot: snapshot || null };
+  addSessionInputs(activeSessionId, [path].concat(snapshot ? [snapshot] : []));
   renderRefChip();
   appendSystem('已引用报告「' + name + '」' + (snapshot ? '（含数据快照）' : '') + '，可在下方直接追问');
   input.focus();
