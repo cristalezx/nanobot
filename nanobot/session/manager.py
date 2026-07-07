@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -131,6 +132,7 @@ class SessionManager:
             messages = []
             metadata = {}
             created_at = None
+            updated_at = None
             last_consolidated = 0
 
             with open(path, encoding="utf-8") as f:
@@ -144,6 +146,7 @@ class SessionManager:
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
+                        updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -152,6 +155,7 @@ class SessionManager:
                 key=key,
                 messages=messages,
                 created_at=created_at or datetime.now(),
+                updated_at=updated_at or created_at or datetime.now(),
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )
@@ -200,8 +204,12 @@ class SessionManager:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
                             key = data.get("key") or path.stem.replace("_", ":", 1)
+                            metadata = data.get("metadata", {})
                             sessions.append({
                                 "key": key,
+                                "title": metadata.get("title") or key.split(":", 1)[-1],
+                                "project_id": metadata.get("project_id"),
+                                "metadata": metadata,
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)
@@ -210,3 +218,68 @@ class SessionManager:
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+
+    def delete(self, key: str) -> bool:
+        """Delete a session from disk and cache."""
+        self.invalidate(key)
+        path = self._get_session_path(key)
+        if path.exists():
+            path.unlink()
+            return True
+        return False
+
+    def update_metadata(self, key: str, **metadata: Any) -> Session:
+        """Update session metadata, creating the session if needed."""
+        session = self.get_or_create(key)
+        for k, v in metadata.items():
+            if v is None:
+                session.metadata.pop(k, None)
+            else:
+                session.metadata[k] = v
+        session.updated_at = datetime.now()
+        self.save(session)
+        return session
+
+    @property
+    def projects_path(self) -> Path:
+        """Metadata file for sidebar project groups."""
+        return self.workspace / "projects.json"
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        """List sidebar project groups."""
+        try:
+            data = json.loads(self.projects_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = []
+        if not isinstance(data, list):
+            return []
+        return sorted(data, key=lambda x: x.get("updated_at", x.get("created_at", "")), reverse=True)
+
+    def save_projects(self, projects: list[dict[str, Any]]) -> None:
+        """Persist sidebar project groups."""
+        self.projects_path.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def create_project(self, name: str) -> dict[str, Any]:
+        """Create a sidebar project group."""
+        now = datetime.now().isoformat()
+        project = {
+            "id": uuid.uuid4().hex[:12],
+            "name": name.strip() or "新项目",
+            "created_at": now,
+            "updated_at": now,
+        }
+        projects = self.list_projects()
+        projects.insert(0, project)
+        self.save_projects(projects)
+        return project
+
+    def rename_project(self, project_id: str, name: str) -> dict[str, Any] | None:
+        """Rename a sidebar project group."""
+        projects = self.list_projects()
+        for project in projects:
+            if project.get("id") == project_id:
+                project["name"] = name.strip() or project.get("name") or "新项目"
+                project["updated_at"] = datetime.now().isoformat()
+                self.save_projects(projects)
+                return project
+        return None

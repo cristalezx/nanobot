@@ -75,6 +75,25 @@ class ShareRequest(BaseModel):
     session_id: str
 
 
+class SessionCreateRequest(BaseModel):
+    session_id: str
+    title: str | None = None
+    project_id: str | None = None
+
+
+class SessionUpdateRequest(BaseModel):
+    title: str | None = None
+    project_id: str | None = None
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+
+
+class ProjectUpdateRequest(BaseModel):
+    name: str
+
+
 class ModelSwitchRequest(BaseModel):
     model: str
 
@@ -442,18 +461,84 @@ def create_app(
         ag = _get_agent(request)
         return {"sessions": ag.sessions.list_sessions()}
 
-    @app.delete("/v1/sessions/{session_id:path}")
-    async def clear_session(session_id: str, request: Request):
+    @app.post("/v1/sessions")
+    async def create_session(body: SessionCreateRequest, request: Request):
+        ag = _get_agent(request)
+        session_id = body.session_id.strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id required")
+        session = ag.sessions.get_or_create(session_id)
+        if body.title is not None:
+            session.metadata["title"] = body.title.strip() or session_id.split(":", 1)[-1]
+        if body.project_id:
+            session.metadata["project_id"] = body.project_id
+        else:
+            session.metadata.pop("project_id", None)
+        ag.sessions.save(session)
+        return {
+            "ok": True,
+            "session": {
+                "key": session.key,
+                "title": session.metadata.get("title") or session.key.split(":", 1)[-1],
+                "project_id": session.metadata.get("project_id"),
+                "created_at": session.created_at.isoformat(),
+                "updated_at": session.updated_at.isoformat(),
+            },
+        }
+
+    @app.patch("/v1/sessions/{session_id:path}")
+    async def update_session(session_id: str, body: SessionUpdateRequest, request: Request):
+        ag = _get_agent(request)
+        metadata = {}
+        if body.title is not None:
+            metadata["title"] = body.title.strip() or session_id.split(":", 1)[-1]
+        if body.project_id is not None:
+            metadata["project_id"] = body.project_id or None
+        session = ag.sessions.update_metadata(session_id, **metadata)
+        return {
+            "ok": True,
+            "session": {
+                "key": session.key,
+                "title": session.metadata.get("title") or session.key.split(":", 1)[-1],
+                "project_id": session.metadata.get("project_id"),
+                "created_at": session.created_at.isoformat(),
+                "updated_at": session.updated_at.isoformat(),
+            },
+        }
+
+    @app.post("/v1/sessions/{session_id:path}/clear")
+    async def clear_session_context(session_id: str, request: Request):
         ag = _get_agent(request)
         session = ag.sessions.get_or_create(session_id)
         session.clear()
         ag.sessions.save(session)
         ag.sessions.invalidate(session_id)
-        # Also remove the JSONL file so it disappears from the list
-        path = ag.sessions._get_session_path(session_id)
-        if path.exists():
-            path.unlink()
         return {"ok": True, "session_id": session_id}
+
+    @app.delete("/v1/sessions/{session_id:path}")
+    async def delete_session(session_id: str, request: Request):
+        ag = _get_agent(request)
+        deleted = ag.sessions.delete(session_id)
+        return {"ok": True, "session_id": session_id, "deleted": deleted}
+
+    @app.get("/v1/projects")
+    async def list_projects(request: Request):
+        ag = _get_agent(request)
+        return {"projects": ag.sessions.list_projects()}
+
+    @app.post("/v1/projects")
+    async def create_project(body: ProjectCreateRequest, request: Request):
+        ag = _get_agent(request)
+        project = ag.sessions.create_project(body.name)
+        return {"ok": True, "project": project}
+
+    @app.patch("/v1/projects/{project_id}")
+    async def rename_project(project_id: str, body: ProjectUpdateRequest, request: Request):
+        ag = _get_agent(request)
+        project = ag.sessions.rename_project(project_id, body.name)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return {"ok": True, "project": project}
 
     @app.get("/v1/sessions/{session_id:path}/messages")
     async def get_session_messages(session_id: str, request: Request):
