@@ -120,6 +120,22 @@
   .new .bubble {
     will-change: contents;
   }
+  .thought {
+    margin: 0 0 14px 40px;
+    max-width: 760px;
+    border: 1px solid #ececf4;
+    border-radius: 10px;
+    background: #fafafe;
+    color: #6f7080;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .thought strong {
+    display: block;
+    color: #5c5cff;
+    margin-bottom: 4px;
+  }
   .caret::after {
     content: "";
     display: inline-block;
@@ -257,6 +273,10 @@ function runOld() {
 function runNew() {
   const chat = document.getElementById("newChat");
   const bubble = makeBubble(chat);
+  const thought = document.createElement("div");
+  thought.className = "thought";
+  thought.style.display = "none";
+  chat.insertBefore(thought, chat.firstChild);
   const sample = buildSample();
   const jump = document.createElement("button");
   jump.className = "jump";
@@ -288,6 +308,26 @@ function runNew() {
       .replace(/^[\s\S]*?<\/think>/gi, "")
       .replace(/<\s*t(?:h(?:i(?:n(?:k)?)?)?)?$/gi, "")
       .trimStart();
+  }
+
+  function extractThinkingText(text) {
+    const raw = String(text || "");
+    const parts = [];
+    raw.replace(/<think\b[^>]*>([\s\S]*?)<\/think>/gi, (_, inner) => {
+      if (inner && inner.trim()) parts.push(inner.trim());
+      return "";
+    });
+    const lower = raw.toLowerCase();
+    const lastOpen = lower.lastIndexOf("<think");
+    const lastClose = lower.lastIndexOf("</think>");
+    if (lastOpen > lastClose) {
+      const openEnd = raw.indexOf(">", lastOpen);
+      if (openEnd >= 0) {
+        const active = raw.slice(openEnd + 1).trim();
+        if (active) parts.push(active);
+      }
+    }
+    return parts.join("\n\n").trim();
   }
 
   function renderLiveMarkdown(text) {
@@ -332,6 +372,11 @@ function runNew() {
 
   function flush() {
     pending = false;
+    const thinking = extractThinkingText(buf);
+    if (thinking) {
+      thought.style.display = "block";
+      thought.innerHTML = "<strong>思考中…</strong>" + inline(thinking).replace(/\n/g, "<br>");
+    }
     const visible = stripThinkingText(buf);
     if (!visible) return;
     if (rendered !== visible) {

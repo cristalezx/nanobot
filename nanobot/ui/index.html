@@ -1236,6 +1236,7 @@ function getSes(sid) {
     sesStore.set(sid, {
       ws: null, busy: false, unread: false, chatEl: el,
       typingEl: null, streamBubbleEl: null, streamBuffer: '', streamRawBuffer: '',
+      streamThinkingEl: null, streamThinkingLast: '',
       streamRateEl: null, _streamTextNode: null, streamTokenCount: 0, streamStartTime: 0,
       streamFlushPending: false, streamLastRendered: '', streamShouldStick: true,
       currentStepsGroup: null, stepsCounter: 0,
@@ -2739,6 +2740,7 @@ function connectSession(sid) {
       s.streamBubbleEl.innerHTML = renderMarkdown(s.streamBuffer);
       enhanceBubble(s.streamBubbleEl);
       s.streamBubbleEl = null; s._streamTextNode = null; s.streamBuffer = ''; s.streamRawBuffer = '';
+      s.streamThinkingEl = null; s.streamThinkingLast = '';
       s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
       s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
     }
@@ -2827,6 +2829,8 @@ function sendMessage() {
   s.streamBubbleEl = null;
   s.streamBuffer = '';
   s.streamRawBuffer = '';
+  s.streamThinkingEl = null;
+  s.streamThinkingLast = '';
   s.streamLastRendered = '';
   s.streamFlushPending = false;
   s.streamShouldStick = true;
@@ -2853,6 +2857,7 @@ async function clearSession() {
   s.toolsUsed = []; s.skillsUsed = [];
   s.filesWrittenThisTurn = []; s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = ''; s.streamRawBuffer = ''; s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
+  s.streamThinkingEl = null; s.streamThinkingLast = '';
   s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
   s.sessionInputs = [];
   s.sessionArtifacts = [];
@@ -2950,6 +2955,26 @@ function stripThinkingText(text) {
     .replace(/^[\s\S]*?<\/think>/gi, '')
     .replace(/<\s*t(?:h(?:i(?:n(?:k)?)?)?)?$/gi, '')
     .trimStart();
+}
+
+function extractThinkingText(text) {
+  var raw = String(text || '');
+  var parts = [];
+  raw.replace(/<think\b[^>]*>([\s\S]*?)<\/think>/gi, function(_, thought) {
+    if (thought && thought.trim()) parts.push(thought.trim());
+    return '';
+  });
+  var lower = raw.toLowerCase();
+  var lastOpen = lower.lastIndexOf('<think');
+  var lastClose = lower.lastIndexOf('</think>');
+  if (lastOpen > lastClose) {
+    var openEnd = raw.indexOf('>', lastOpen);
+    if (openEnd >= 0) {
+      var active = raw.slice(openEnd + 1).trim();
+      if (active) parts.push(active);
+    }
+  }
+  return parts.join('\n\n').trim();
 }
 
 function renderLiveMarkdown(text) {
@@ -3065,6 +3090,7 @@ function appendPush(text) {
 function streamToken(delta) {
   var s = getSes(currentSessionId);
   s.streamRawBuffer = (s.streamRawBuffer || '') + delta;
+  updateStreamThinking(extractThinkingText(s.streamRawBuffer));
   var visible = stripThinkingText(s.streamRawBuffer);
   if (!visible) return;
   if (!s.streamBubbleEl) {
@@ -3141,6 +3167,7 @@ function streamCancel() {
   }
   s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = ''; s.streamRawBuffer = '';
+  s.streamThinkingEl = null; s.streamThinkingLast = '';
   s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
   s.streamRateEl = null;
   s.streamTokenCount = 0; s.streamStartTime = 0;
@@ -3160,6 +3187,7 @@ function streamFinalize(finalText) {
   enhanceBubble(s.streamBubbleEl);
   s.streamBubbleEl = null; s._streamTextNode = null;
   s.streamBuffer = ''; s.streamRawBuffer = '';
+  s.streamThinkingEl = null; s.streamThinkingLast = '';
   s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
   s.streamRateEl = null;
   s.streamTokenCount = 0; s.streamStartTime = 0;
@@ -3289,6 +3317,30 @@ function appendStep(text, isTool) {
   scrollBottom();
 }
 
+function updateStreamThinking(text) {
+  var thought = String(text || '').trim();
+  if (!thought) return;
+  var s = getSes(currentSessionId);
+  if (thought === s.streamThinkingLast) return;
+  var group = ensureStepsGroup();
+  var content = group.querySelector('.steps-content');
+
+  if (!s.streamThinkingEl) {
+    s.streamThinkingEl = document.createElement('div');
+    s.streamThinkingEl.className = 'step-item progress';
+    content.appendChild(s.streamThinkingEl);
+    s.stepsCounter++;
+  }
+
+  s.streamThinkingLast = thought;
+  s.streamThinkingEl.textContent = '💭 ' + thought.slice(0, 1600);
+
+  var summary = group.querySelector('.step-summary');
+  summary.textContent = '思考中… (' + s.stepsCounter + ' 步)';
+  content.style.maxHeight = (content.scrollHeight + 40) + 'px';
+  scrollBottom();
+}
+
 function finalizeCurrentSteps() {
   var s = getSes(currentSessionId);
   if (!s.currentStepsGroup) return;
@@ -3304,6 +3356,8 @@ function finalizeCurrentSteps() {
 
   s.currentStepsGroup = null;
   s.stepsCounter = 0;
+  s.streamThinkingEl = null;
+  s.streamThinkingLast = '';
   s.toolsUsed = [];
   s.skillsUsed = [];
 }
