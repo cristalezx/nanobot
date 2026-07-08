@@ -214,7 +214,12 @@ ${baseSample}
 
 补充说明：这一段故意写得比较长，用来模拟真实 agent 在解释需求、列出方案、比较 tradeoff、生成多段结论时的输出。用户应该可以在输出过程中停下来阅读任意一段，而不是被页面持续拖到最新 token。`);
   }
-  return blocks.join("\n\n---\n\n");
+  return `<think>
+这里模拟模型的内部推理：先判断用户真正不舒服的是 Markdown 中间态、思考内容泄漏和持续追底。
+这段内容不应该进入答案气泡，流式阶段也不应该闪一下再收回。
+</think>
+
+` + blocks.join("\n\n---\n\n");
 }
 
 let timers = [];
@@ -271,6 +276,20 @@ function runNew() {
     return chat.scrollHeight - chat.scrollTop - chat.clientHeight < 100;
   }
 
+  function bubbleTooTall() {
+    const msg = bubble.closest(".msg");
+    return msg && msg.getBoundingClientRect().height > Math.max(360, chat.clientHeight * 0.82);
+  }
+
+  function stripThinkingText(text) {
+    return String(text || "")
+      .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "")
+      .replace(/<think\b[^>]*>[\s\S]*$/gi, "")
+      .replace(/^[\s\S]*?<\/think>/gi, "")
+      .replace(/<\s*t(?:h(?:i(?:n(?:k)?)?)?)?$/gi, "")
+      .trimStart();
+  }
+
   function renderLiveMarkdown(text) {
     const lines = text.split("\n");
     let html = "";
@@ -313,13 +332,20 @@ function runNew() {
 
   function flush() {
     pending = false;
-    if (rendered !== buf) {
-      bubble.innerHTML = renderLiveMarkdown(buf);
-      rendered = buf;
+    const visible = stripThinkingText(buf);
+    if (!visible) return;
+    if (rendered !== visible) {
+      bubble.innerHTML = renderLiveMarkdown(visible);
+      rendered = visible;
     }
     if (stick) {
-      chat.scrollTop = chat.scrollHeight;
-      jump.classList.remove("show");
+      if (bubbleTooTall()) {
+        stick = false;
+        jump.classList.add("show");
+      } else {
+        chat.scrollTop = chat.scrollHeight;
+        jump.classList.remove("show");
+      }
     } else {
       jump.classList.add("show");
     }

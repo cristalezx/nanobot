@@ -1235,7 +1235,7 @@ function getSes(sid) {
     chat.appendChild(el);
     sesStore.set(sid, {
       ws: null, busy: false, unread: false, chatEl: el,
-      typingEl: null, streamBubbleEl: null, streamBuffer: '',
+      typingEl: null, streamBubbleEl: null, streamBuffer: '', streamRawBuffer: '',
       streamRateEl: null, _streamTextNode: null, streamTokenCount: 0, streamStartTime: 0,
       streamFlushPending: false, streamLastRendered: '', streamShouldStick: true,
       currentStepsGroup: null, stepsCounter: 0,
@@ -2738,7 +2738,7 @@ function connectSession(sid) {
       s.streamBubbleEl.classList.remove('streaming');
       s.streamBubbleEl.innerHTML = renderMarkdown(s.streamBuffer);
       enhanceBubble(s.streamBubbleEl);
-      s.streamBubbleEl = null; s._streamTextNode = null; s.streamBuffer = '';
+      s.streamBubbleEl = null; s._streamTextNode = null; s.streamBuffer = ''; s.streamRawBuffer = '';
       s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
       s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
     }
@@ -2826,6 +2826,7 @@ function sendMessage() {
   s.filesWrittenThisTurn = [];
   s.streamBubbleEl = null;
   s.streamBuffer = '';
+  s.streamRawBuffer = '';
   s.streamLastRendered = '';
   s.streamFlushPending = false;
   s.streamShouldStick = true;
@@ -2851,7 +2852,7 @@ async function clearSession() {
   s.currentStepsGroup = null; s.stepsCounter = 0;
   s.toolsUsed = []; s.skillsUsed = [];
   s.filesWrittenThisTurn = []; s.streamBubbleEl = null; s._streamTextNode = null;
-  s.streamBuffer = ''; s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
+  s.streamBuffer = ''; s.streamRawBuffer = ''; s.streamRateEl = null; s.streamTokenCount = 0; s.streamStartTime = 0;
   s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
   s.sessionInputs = [];
   s.sessionArtifacts = [];
@@ -2897,6 +2898,13 @@ function isNearChatBottom() {
   return chat.scrollHeight - chat.scrollTop - chat.clientHeight < 120;
 }
 
+function streamBubbleTooTall(s) {
+  if (!s || !s.streamBubbleEl || currentSessionId !== activeSessionId) return false;
+  var msgEl = s.streamBubbleEl.closest('.msg');
+  if (!msgEl) return false;
+  return msgEl.getBoundingClientRect().height > Math.max(360, chat.clientHeight * 0.82);
+}
+
 function ensureJumpButton() {
   var panel = document.getElementById('chat-panel');
   if (jumpBtn && jumpBtn.parentNode === panel) return jumpBtn;
@@ -2930,8 +2938,18 @@ chat.addEventListener('scroll', function() {
 });
 
 function renderMarkdown(md) {
+  md = stripThinkingText(md);
   if (typeof marked === 'undefined') return escapeHtml(md || '');
   return marked.parse(md || '');
+}
+
+function stripThinkingText(text) {
+  return String(text || '')
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think\b[^>]*>[\s\S]*$/gi, '')
+    .replace(/^[\s\S]*?<\/think>/gi, '')
+    .replace(/<\s*t(?:h(?:i(?:n(?:k)?)?)?)?$/gi, '')
+    .trimStart();
 }
 
 function renderLiveMarkdown(text) {
@@ -3046,6 +3064,9 @@ function appendPush(text) {
 // ── Streaming bubble ───────────────────────────────────────────────────────
 function streamToken(delta) {
   var s = getSes(currentSessionId);
+  s.streamRawBuffer = (s.streamRawBuffer || '') + delta;
+  var visible = stripThinkingText(s.streamRawBuffer);
+  if (!visible) return;
   if (!s.streamBubbleEl) {
     var wrapper = document.createElement('div');
     wrapper.className = 'msg bot';
@@ -3074,7 +3095,7 @@ function streamToken(delta) {
     s.streamTokenCount = 0;
     s.streamStartTime = Date.now();
   }
-  s.streamBuffer += delta;
+  s.streamBuffer = visible;
   s.streamTokenCount++;
   s.streamShouldStick = s.streamShouldStick && isNearChatBottom();
   if (!s.streamFlushPending) {
@@ -3100,7 +3121,15 @@ function flushStream(sid) {
   if (elapsed > 0.35) {
     s.streamRateEl.textContent = Math.round(s.streamTokenCount / elapsed) + ' tok/s';
   }
-  if (sid === activeSessionId && s.streamShouldStick) scrollBottom();
+  if (sid === activeSessionId && s.streamShouldStick) {
+    if (streamBubbleTooTall(s)) {
+      s.streamShouldStick = false;
+      setJumpVisible(true);
+    } else {
+      chat.scrollTop = chat.scrollHeight;
+      setJumpVisible(false);
+    }
+  }
   currentSessionId = prevSid;
 }
 
@@ -3111,7 +3140,7 @@ function streamCancel() {
     if (msgEl) msgEl.remove();
   }
   s.streamBubbleEl = null; s._streamTextNode = null;
-  s.streamBuffer = '';
+  s.streamBuffer = ''; s.streamRawBuffer = '';
   s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
   s.streamRateEl = null;
   s.streamTokenCount = 0; s.streamStartTime = 0;
@@ -3126,10 +3155,11 @@ function streamFinalize(finalText) {
     s.streamFlushPending = false;
   }
   s.streamBubbleEl.classList.remove('streaming');
-  s.streamBubbleEl.innerHTML = renderMarkdown(finalText != null ? finalText : s.streamBuffer);
+  var finalVisible = stripThinkingText(finalText != null ? finalText : (s.streamRawBuffer || s.streamBuffer));
+  s.streamBubbleEl.innerHTML = renderMarkdown(finalVisible);
   enhanceBubble(s.streamBubbleEl);
   s.streamBubbleEl = null; s._streamTextNode = null;
-  s.streamBuffer = '';
+  s.streamBuffer = ''; s.streamRawBuffer = '';
   s.streamLastRendered = ''; s.streamFlushPending = false; s.streamShouldStick = true;
   s.streamRateEl = null;
   s.streamTokenCount = 0; s.streamStartTime = 0;

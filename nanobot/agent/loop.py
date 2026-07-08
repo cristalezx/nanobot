@@ -164,7 +164,11 @@ class AgentLoop:
         """Remove <think>…</think> blocks that some models embed in content."""
         if not text:
             return None
-        return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
+        cleaned = re.sub(r"<think\b[^>]*>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
+        cleaned = re.sub(r"<think\b[^>]*>[\s\S]*$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^[\s\S]*?</think>", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"<\s*t(?:h(?:i(?:n(?:k)?)?)?)?$", "", cleaned, flags=re.IGNORECASE)
+        return cleaned.strip() or None
 
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
