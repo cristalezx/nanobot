@@ -551,6 +551,23 @@ body.resizing iframe { pointer-events: none; }
 #ref-bar .picked .rx { cursor: pointer; font-weight: 700; padding: 0 2px; }
 #ref-bar .picked .rx:hover { color: var(--accent-hover); }
 
+/* ── Pending images bar (staged to send with the next message) ── */
+#img-pending-bar {
+  flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 8px max(16px, calc((100% - 820px) / 2)) 0;
+}
+.img-pending-chip {
+  position: relative; width: 56px; height: 56px; border-radius: 8px;
+  overflow: hidden; border: 1px solid var(--border); flex-shrink: 0;
+}
+.img-pending-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.img-pending-chip .rm {
+  position: absolute; top: 2px; right: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; border: none;
+  cursor: pointer; font-size: 0.62rem; line-height: 16px; padding: 0;
+}
+.img-pending-chip .rm:hover { background: rgba(0,0,0,.8); }
+
 /* ── Session artifacts bar ── */
 #chat-artifacts-bar {
   flex-shrink: 0; display: none; align-items: center; justify-content: flex-end;
@@ -626,6 +643,11 @@ body.resizing iframe { pointer-events: none; }
 .msg.push .bubble {
   background: #fff8e6; color: #8a6d1a; border-radius: 10px;
   border: 1px solid #f0d480; font-size: 0.85rem; width: 100%;
+}
+.bubble .msg-images { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.bubble .msg-images img {
+  width: 110px; height: 110px; object-fit: cover; border-radius: 10px;
+  cursor: pointer; display: block;
 }
 .bubble pre { background: var(--code-bg); border: 1px solid var(--border);
               border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
@@ -1098,6 +1120,7 @@ body.resizing iframe { pointer-events: none; }
     <div id="chat"></div>
     <button id="jump-bottom" onclick="jumpToBottom()">回到底部</button>
     <div id="ref-bar" style="display:none;"></div>
+    <div id="img-pending-bar" style="display:none;"></div>
     <div id="input-bar">
       <button id="attach-btn" onclick="document.getElementById('chat-upload-input').click()" title="上传附件">
         <svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;"><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 1 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
@@ -1243,7 +1266,8 @@ function getSes(sid) {
       toolsUsed: [], skillsUsed: [], filesWrittenThisTurn: [],
       sessionArtifacts: [],  // {path, name, kind} accumulated across the whole session
       sessionInputs: [],  // uploaded or referenced input materials
-      referencedReport: null  // {path, name, snapshot} — report referenced for follow-up
+      referencedReport: null,  // {path, name, snapshot} — report referenced for follow-up
+      pendingImages: []  // {path, name, previewUrl} staged to send with the next message
     });
   }
   return sesStore.get(sid);
@@ -1713,6 +1737,7 @@ function switchSession(sid) {
   renderArtifactsBar();
   renderRefChip();
   renderConversationBar();
+  renderPendingImages();
 
   // Scroll to bottom of newly visible session
   chat.scrollTop = chat.scrollHeight;
@@ -2098,29 +2123,72 @@ async function uploadFilesToCurrentDir(fileList) {
   loadFiles(currentFilePath || '');
 }
 
-// Chat: upload attachments into uploads/, then reference their paths in the input
-// so the agent knows where to read them.
+// Chat: upload attachments into uploads/. Images are staged as "pending
+// images" — sent as real vision content with the next message (see
+// sendMessage). Non-image files fall back to a text path reference so the
+// agent can open them with its file tools.
 async function uploadChatAttachments(fileList) {
   var files = Array.from(fileList || []);
   if (!files.length) return;
+  var images = files.filter(function(f) { return f.type && f.type.indexOf('image/') === 0; });
+  var others = files.filter(function(f) { return !(f.type && f.type.indexOf('image/') === 0); });
   var btn = document.getElementById('attach-btn');
   btn.disabled = true;
-  var paths = [];
-  for (var i = 0; i < files.length; i++) {
-    try {
-      var saved = await uploadOneFile(files[i], 'uploads');
-      if (saved) paths.push(saved);
-    } catch (_) {}
+
+  if (images.length) {
+    var s = getSes(activeSessionId);
+    for (var i = 0; i < images.length; i++) {
+      try {
+        var saved = await uploadOneFile(images[i], 'uploads');
+        if (saved) {
+          s.pendingImages.push({ path: saved, name: saved.split('/').pop(), previewUrl: URL.createObjectURL(images[i]) });
+          addSessionInputs(activeSessionId, [saved]);
+        }
+      } catch (_) {}
+    }
+    renderPendingImages();
   }
+
+  if (others.length) {
+    var paths = [];
+    for (var j = 0; j < others.length; j++) {
+      try {
+        var savedOther = await uploadOneFile(others[j], 'uploads');
+        if (savedOther) paths.push(savedOther);
+      } catch (_) {}
+    }
+    if (paths.length) {
+      addSessionInputs(activeSessionId, paths);
+      var ref = '附件：' + paths.join('、') + '\n';
+      input.value = ref + input.value;
+      input.dispatchEvent(new Event('input'));
+    }
+  }
+
   document.getElementById('chat-upload-input').value = '';
   btn.disabled = false;
-  if (!paths.length) { appendSystem('附件上传失败'); return; }
-  addSessionInputs(activeSessionId, paths);
-  // Prepend a reference line to the message input.
-  var ref = '附件：' + paths.join('、') + '\n';
-  input.value = ref + input.value;
+  if (!images.length && !others.length) { appendSystem('附件上传失败'); return; }
   input.focus();
-  input.dispatchEvent(new Event('input'));
+}
+
+// ── Pending images (staged to send as vision content with the next message) ──
+function renderPendingImages() {
+  var bar = document.getElementById('img-pending-bar');
+  var s = getSes(activeSessionId);
+  var imgs = s.pendingImages || [];
+  if (!imgs.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = imgs.map(function(im, i) {
+    return '<div class="img-pending-chip"><img src="' + im.previewUrl + '" title="' + escapeAttr(im.name) + '">' +
+      '<button class="rm" onclick="removePendingImage(' + i + ')" title="移除">✕</button></div>';
+  }).join('');
+}
+function removePendingImage(i) {
+  var s = getSes(activeSessionId);
+  var im = s.pendingImages[i];
+  if (im) { try { URL.revokeObjectURL(im.previewUrl); } catch (_) {} }
+  s.pendingImages.splice(i, 1);
+  renderPendingImages();
 }
 
 // ── Skills ─────────────────────────────────────────────────────────────────
@@ -2806,8 +2874,9 @@ function routeMessage(sid, msg) {
 function sendMessage() {
   var text = input.value.trim();
   var s = getSes(activeSessionId);
-  if (!text || s.busy || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
-  appendUser(text);
+  var pendingImgs = s.pendingImages || [];
+  if ((!text && !pendingImgs.length) || s.busy || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
+  appendUser(text, false, pendingImgs);
   var payload = text;
   if (s.referencedReport) {
     var r = s.referencedReport;
@@ -2818,7 +2887,12 @@ function sendMessage() {
     hint += '。请先阅读该报告' + (r.snapshot ? '及其快照' : '') + '，再据此回答以下问题。]\n\n';
     payload = hint + text;
   }
-  s.ws.send(JSON.stringify({ content: payload }));
+  var media = pendingImgs.map(function(im) { return im.path; });
+  s.ws.send(JSON.stringify({ content: payload, media: media }));
+  // Pending images were just sent — drop the staging previews (object URLs
+  // are only needed until the bubble above renders its own <img> copies).
+  s.pendingImages = [];
+  renderPendingImages();
   input.value = '';
   input.style.height = '';
   s.currentStepsGroup = null;
@@ -2863,6 +2937,8 @@ async function clearSession() {
   s.sessionArtifacts = [];
   renderArtifactsBar();
   s.referencedReport = null; renderRefChip();
+  (s.pendingImages || []).forEach(function(im) { try { URL.revokeObjectURL(im.previewUrl); } catch (_) {} });
+  s.pendingImages = []; renderPendingImages();
   appendSystem('当前对话上下文已清空');
   loadSessionList();
 }
@@ -3052,13 +3128,20 @@ function enhanceBubble(bubbleEl) {
   }
 }
 
-function appendUser(text, isHistory) {
+function appendUser(text, isHistory, images) {
   var el = document.createElement('div');
   el.className = 'msg user';
   if (isHistory) el.style.opacity = '0.85';
+  var imagesHtml = '';
+  if (images && images.length) {
+    imagesHtml = '<div class="msg-images">' + images.map(function(im) {
+      return '<img src="' + im.previewUrl + '" title="' + escapeAttr(im.name) +
+        '" onclick="window.open(this.src,\'_blank\')">';
+    }).join('') + '</div>';
+  }
   el.innerHTML =
     '<div class="avatar">👤</div>' +
-    '<div class="bubble">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div>';
+    '<div class="bubble">' + imagesHtml + escapeHtml(text).replace(/\n/g, '<br>') + '</div>';
   chatAppend(el);
   if (!isHistory) scrollBottom();
 }

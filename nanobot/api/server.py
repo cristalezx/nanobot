@@ -1307,9 +1307,18 @@ def create_app(
             finally:
                 pending_approvals.pop(approval_id, None)
 
-        async def handle_message(content: str) -> None:
+        async def handle_message(content: str, media: list[str] | None = None) -> None:
+            resolved_media: list[str] = []
+            for m in (media or []):
+                try:
+                    p = _resolve_path(m, ag)
+                except HTTPException:
+                    continue  # path escapes the workspace — silently drop it
+                if p.is_file():
+                    resolved_media.append(str(p))
             msg = InboundMessage(
                 channel="web", sender_id="web_user", chat_id=chat_id, content=content,
+                media=resolved_media,
             )
             try:
                 response = await ag._process_message(
@@ -1343,13 +1352,14 @@ def create_app(
                     continue
 
                 content = (data.get("content") or "").strip()
-                if not content:
+                media = data.get("media") or []
+                if not content and not media:
                     continue
                 # One in-flight turn per connection (UI gates send while busy).
                 if current_task is not None and not current_task.done():
                     await ws.send_json({"type": "progress", "content": "上一条还在处理中，请稍候…"})
                     continue
-                current_task = asyncio.create_task(handle_message(content))
+                current_task = asyncio.create_task(handle_message(content, media))
         except WebSocketDisconnect:
             pass
         except Exception as e:
